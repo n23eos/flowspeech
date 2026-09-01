@@ -1,8 +1,12 @@
-
-
 # FlowSpeech
 
-A local, open-source alternative to Wispr Flow for macOS. Hold **right option** in any window, speak, release — clean, formatted text appears at your cursor.
+**FlowSpeech is a local dictation tool for macOS: hold right option in any window, speak, release, and cleaned-up text lands at the cursor.** Recognition runs on faster-whisper on the machine itself, so it costs nothing and needs no internet. Cleanup of filler words, punctuation and slips goes through Claude, OpenAI, DeepSeek or Ollama, switchable from the menu bar. It counts words and speed in WPM, breaks usage down per application, and keeps a personal dictionary and a feedback log. Push-to-talk and toggle modes, a live waveform overlay while recording, and a build script that produces a real FlowSpeech.app with launch at login.
+
+<div align="center">
+
+[![Star on GitHub](https://img.shields.io/github/stars/N23eos/flowspeech?style=for-the-badge&logo=github&label=Star%20this%20repo&color=FFD700&labelColor=1a1a1a)](https://github.com/N23eos/flowspeech)
+
+</div>
 
 - Speech recognition runs **locally** (faster-whisper — free, no internet required).
 - Text cleanup (filler words, punctuation, mistakes) via Claude / OpenAI / DeepSeek / Ollama, switchable right from the menu bar.
