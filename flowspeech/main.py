@@ -5,9 +5,11 @@ import os
 import subprocess
 import threading
 import time
+from dataclasses import replace
 from datetime import datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+from uuid import uuid4
 
 import rumps
 
@@ -40,6 +42,7 @@ from flowspeech.injector import (
     insert_text,
 )
 from flowspeech.license import BUY_URL, KIND_LICENSED, LicenseManager
+from flowspeech.markdown_export import DictationExport, ExportStatus, MarkdownExporter
 from flowspeech.overlay import Overlay
 from flowspeech.recorder import Recorder
 from flowspeech.stats import SessionRecord, StatsStore
@@ -109,6 +112,7 @@ SOUND_DONE_VOLUME = 0.15  # barely audible confirmation
 
 HISTORY_MENU_TITLE = "История диктовок"
 HISTORY_LIMIT = 10
+RETRY_MARKDOWN_EXPORT_TITLE = "Повторить сохранение Markdown"
 
 MENU_ACTIVATE_IDLE = "🎙️  Начать запись"
 MENU_ACTIVATE_RECORDING = "⏹️  Остановить запись"
@@ -217,6 +221,7 @@ class FlowSpeechApp(rumps.App):
         self._license = LicenseManager(config.data_dir)
         self._overlay = Overlay()
         self._target_app = "unknown"
+        self._failed_markdown_export: DictationExport | None = None
 
         # One lock guards the whole hotkey state machine. Hotkey callbacks
         # arrive on pynput's listener thread, menu clicks on the main thread.
@@ -363,6 +368,10 @@ class FlowSpeechApp(rumps.App):
             None,
             rumps.MenuItem("Статистика за 7 дней", callback=self._on_stats_click),
             (HISTORY_MENU_TITLE, self._history_items()),
+            rumps.MenuItem(
+                RETRY_MARKDOWN_EXPORT_TITLE,
+                callback=self._on_retry_markdown_export_click,
+            ),
             None,
             ("Провайдер очистки", provider_items),
         ]
@@ -468,6 +477,31 @@ class FlowSpeechApp(rumps.App):
             self._overlay.flash("📋 Скопировано в буфер")
         else:
             self._overlay.flash("⚠️ Не удалось скопировать")
+
+    def _export_markdown(self, snapshot: DictationExport):
+        """Export separately from paste; preserve one failed snapshot for retry."""
+        result = MarkdownExporter(snapshot.destination).export(snapshot)
+        if result.status is ExportStatus.FAILED:
+            self._failed_markdown_export = snapshot
+        elif result.status is ExportStatus.SAVED:
+            self._failed_markdown_export = None
+        return result
+
+    def _on_retry_markdown_export_click(self, _sender) -> None:
+        snapshot = self._failed_markdown_export
+        if snapshot is None:
+            self._overlay.flash("Нет Markdown-заметки для повтора")
+            return
+        destination = self._config.markdown_export
+        if not destination.enabled:
+            self._overlay.flash("Включи сохранение Markdown в настройках")
+            return
+
+        result = self._export_markdown(replace(snapshot, destination=destination))
+        if result.status is ExportStatus.SAVED:
+            self._overlay.flash("💾 Markdown-заметка сохранена")
+        else:
+            self._overlay.flash("⚠️ Markdown-заметка всё ещё не сохранена")
 
     def _on_hotkey_choice_click(self, sender: rumps.MenuItem) -> None:
         name = next(n for n, label in HOTKEY_LABELS.items() if label == sender.title)
@@ -766,8 +800,30 @@ class FlowSpeechApp(rumps.App):
             # Command Mode (that path returns earlier).
             clean = apply_snippets(clean, load_snippets(self._config.data_dir))
 
-            insert_text(clean)
-            if is_translate and provider is None:
+            created_at = datetime.now()
+            export_snapshot = DictationExport.create(
+                session_id=uuid4(),
+                created_at=created_at,
+                final_text=clean,
+                destination=self._config.markdown_export,
+            )
+            export_result = self._export_markdown(export_snapshot)
+
+            paste_failed = False
+            try:
+                insert_text(clean)
+            except Exception:
+                paste_failed = True
+                logger.exception("Text insertion failed; dictation remains exportable")
+
+            if export_result.status is ExportStatus.FAILED:
+                self._overlay.flash("⚠️ Markdown не сохранён - выбери «Повторить сохранение Markdown»")
+            elif paste_failed:
+                if export_result.status is ExportStatus.SAVED:
+                    self._overlay.flash("⚠️ Вставка не выполнена, Markdown сохранён")
+                else:
+                    self._overlay.flash("⚠️ Вставка не выполнена")
+            elif is_translate and provider is None:
                 # Nothing to translate with: the raw transcript was inserted so
                 # the dictation isn't lost; tell the user why it wasn't translated.
                 self._overlay.flash(MSG_TRANSLATE_NEEDS_LLM)
@@ -781,7 +837,7 @@ class FlowSpeechApp(rumps.App):
             logger.debug("Inserted text → %r", clean)
 
             self._stats.record_session(SessionRecord(
-                created_at=datetime.now(),
+                created_at=created_at,
                 duration_sec=transcript.duration_sec,
                 raw_text=transcript.text,
                 clean_text=clean,

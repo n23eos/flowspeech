@@ -17,6 +17,8 @@ from AppKit import (
     NSAlertFirstButtonReturn,
     NSBackingStoreBuffered,
     NSFont,
+    NSModalResponseOK,
+    NSOpenPanel,
     NSLayoutConstraint,
     NSScrollView,
     NSSearchField,
@@ -34,10 +36,11 @@ from AppKit import (
 )
 
 from flowspeech import secrets, uikit as ui
-from flowspeech.config import AppConfig, config_path, save_whisper_cloud
+from flowspeech.config import AppConfig, config_path, save_markdown_export, save_whisper_cloud
 from flowspeech.config_manager import ConfigManager
 from flowspeech.dictionary import dictionary_path, ensure_dictionary
 from flowspeech.formatter import verify_provider
+from flowspeech.markdown_export import validate_export_directory
 from flowspeech.stats import StatsStore
 
 logger = logging.getLogger(__name__)
@@ -389,6 +392,126 @@ def _stats_tab(stats: StatsStore) -> NSTabViewItem:
     return item
 
 
+# --- Markdown export -------------------------------------------------------
+
+def _markdown_export_tab(config: AppConfig, config_manager: ConfigManager) -> NSTabViewItem:
+    item = _tab("markdown-export", "Markdown")
+    selected_directory = config.markdown_export.directory
+
+    enabled = ui.push_button("Сохранять диктовки в Markdown", None)
+    enabled.setButtonType_(3)  # NSSwitchButton
+    enabled.setState_(1 if config.markdown_export.enabled else 0)
+    choose = ui.push_button("Выбрать папку…")
+    check = ui.push_button("Проверить")
+    export_mode = NSSegmentedControl.alloc().initWithFrame_(NSMakeRect(0, 0, 360, 24))
+    export_mode.setSegmentCount_(2)
+    export_mode.setLabel_forSegment_("Дневной файл", 0)
+    export_mode.setLabel_forSegment_("Отдельные файлы", 1)
+    export_mode.setSelectedSegment_(0 if config.markdown_export.mode == "daily" else 1)
+    export_mode.setTranslatesAutoresizingMaskIntoConstraints_(False)
+    status = ui.secondary("")
+    path_label = ui.wrapping(
+        ui.secondary(str(selected_directory) if selected_directory else "Папка не выбрана"),
+        BODY_WIDTH,
+    )
+    preview = ui.wrapping(
+        ui.secondary(
+            "Дневной режим: 2026-09-22.md. Сохраняется только итоговый текст."
+        ),
+        BODY_WIDTH,
+    )
+
+    def selected_mode() -> str:
+        return "daily" if export_mode.selectedSegment() == 0 else "separate"
+
+    def apply_selection(enable_export: bool) -> bool:
+        nonlocal selected_directory
+        if enable_export:
+            validation = validate_export_directory(selected_directory)
+            if not validation.ok:
+                enabled.setState_(0)
+                status.setStringValue_(validation.message)
+                return False
+            selected_directory = validation.directory
+        try:
+            save_markdown_export(
+                enable_export,
+                selected_directory,
+                mode=selected_mode(),
+            )
+            config_manager.reload()
+        except Exception:
+            logger.exception("Saving Markdown export destination failed")
+            status.setStringValue_("Не удалось сохранить настройку")
+            return False
+        path_label.setStringValue_(
+            str(selected_directory) if selected_directory else "Папка не выбрана"
+        )
+        status.setStringValue_(
+            "Автосохранение Markdown включено" if enable_export else "Автосохранение Markdown выключено"
+        )
+        return True
+
+    def on_toggle(_sender):
+        apply_selection(enabled.state() == 1)
+
+    def on_choose(_sender):
+        nonlocal selected_directory
+        panel = NSOpenPanel.openPanel()
+        panel.setCanChooseFiles_(False)
+        panel.setCanChooseDirectories_(True)
+        panel.setAllowsMultipleSelection_(False)
+        panel.setCanCreateDirectories_(True)
+        if panel.runModal() != NSModalResponseOK:
+            return
+        url = panel.URL()
+        if url is None:
+            return
+        selected_directory = Path(str(url.path()))
+        path_label.setStringValue_(str(selected_directory))
+        if enabled.state() == 1:
+            apply_selection(True)
+        else:
+            status.setStringValue_("Папка выбрана. Включи автосохранение, когда будешь готов.")
+
+    def on_check(_sender):
+        validation = validate_export_directory(selected_directory)
+        if validation.ok:
+            status.setStringValue_("Папка готова для сохранения")
+        else:
+            status.setStringValue_(validation.message)
+
+    def on_mode_change(_sender):
+        if enabled.state() == 1:
+            apply_selection(True)
+        else:
+            status.setStringValue_("Режим сохранения выбран")
+
+    ui.on_action(enabled, on_toggle)
+    ui.on_action(choose, on_choose)
+    ui.on_action(check, on_check)
+    ui.on_action(export_mode, on_mode_change)
+
+    body = ui.vstack([
+        ui.title("Автосохранение диктовок"),
+        ui.wrapping(ui.secondary(
+            "После каждой завершённой обычной диктовки FlowSpeech сохранит итоговый текст в выбранной папке. "
+            "Obsidian не требуется."
+        ), BODY_WIDTH),
+        enabled,
+        ui.divider(),
+        ui.secondary("Формат сохранения", size=11),
+        export_mode,
+        ui.secondary("Папка назначения", size=11),
+        path_label,
+        ui.hstack([choose, check]),
+        preview,
+        status,
+    ], spacing=ui.SECTION_SPACING, fill=True)
+    ui.pin(body, item.view())
+    return item
+
+
 # --- Window ----------------------------------------------------------------
 
 def show_settings(
@@ -419,6 +542,7 @@ def show_settings(
         _dictionary_tab(config),
         _history_tab(config, stats),
         _keys_tab(config, config_manager),
+        _markdown_export_tab(config, config_manager),
         _stats_tab(stats),
     ):
         tabs.addTabViewItem_(tab)

@@ -17,6 +17,9 @@ import types
 
 import pytest
 
+from flowspeech.config import AppConfig, LLMConfig, MarkdownExportConfig, WhisperConfig
+from flowspeech.transcriber import Transcript
+
 
 def _stub(name: str, **attrs) -> None:
     module = types.ModuleType(name)
@@ -187,3 +190,59 @@ def test_hold_after_a_completed_dictation_starts_a_new_one(app):
     _hold(app, 1.0)
 
     assert (app.begins, app.finishes) == (2, 2)
+
+
+def test_pipeline_saves_markdown_when_paste_fails(tmp_path, monkeypatch):
+    """The file export happens before a failed accessibility paste."""
+    destination = tmp_path / "Dictations"
+    destination.mkdir()
+    instance = object.__new__(fsmain.FlowSpeechApp)
+    instance._config = AppConfig(
+        hotkey="right_option",
+        whisper=WhisperConfig("small", "ru", "auto"),
+        llm=LLMConfig("none", {}),
+        data_dir=tmp_path,
+        markdown_export=MarkdownExportConfig(enabled=True, directory=destination),
+    )
+    instance._recorder = types.SimpleNamespace(
+        stop=lambda: types.SimpleNamespace(
+            duration_sec=1.0, rms=0.1, reason=None, ok=True, audio=object()
+        )
+    )
+    instance._transcriber = types.SimpleNamespace(
+        transcribe=lambda _audio, _prompt: Transcript("черновик", "ru", 1.0)
+    )
+    instance._overlay = types.SimpleNamespace(
+        messages=[],
+        flash=lambda message: instance._overlay.messages.append(message),
+        hide=lambda: None,
+    )
+    instance._stats = types.SimpleNamespace(record_session=lambda _session: None)
+    instance._target_app = "TextEdit"
+    instance._active_provider = "none"
+    instance._cleanup_mode = fsmain.DEFAULT_MODE
+    instance._mode = fsmain.MODE_DICTATION
+    instance._selection = None
+    instance._state = fsmain.STATE_PROCESSING
+    instance._state_lock = threading.RLock()
+    instance._failed_markdown_export = None
+    monkeypatch.setattr(instance, "_set_state", lambda _icon: None)
+    monkeypatch.setattr(instance, "_refresh_history_menu", lambda: None)
+    monkeypatch.setattr(fsmain, "load_words", lambda _directory: [])
+    monkeypatch.setattr(fsmain, "load_snippets", lambda _directory: {})
+    monkeypatch.setattr(fsmain, "format_text", lambda *_args, **_kwargs: "Готовая заметка")
+    monkeypatch.setattr(fsmain, "apply_snippets", lambda text, _snippets: text)
+    monkeypatch.setattr(fsmain, "play_sound", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(fsmain.feedback, "log_entry", lambda *_args, **_kwargs: None)
+
+    def paste_fails(_text):
+        raise RuntimeError("Accessibility denied")
+
+    monkeypatch.setattr(fsmain, "insert_text", paste_fails)
+
+    instance._process_audio()
+
+    notes = list(destination.glob("*.md"))
+    assert len(notes) == 1
+    assert notes[0].read_text(encoding="utf-8").endswith("Готовая заметка\n")
+    assert instance._overlay.messages == ["⚠️ Вставка не выполнена, Markdown сохранён"]
