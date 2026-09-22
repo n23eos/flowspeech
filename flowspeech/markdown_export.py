@@ -4,6 +4,7 @@ import logging
 import os
 import stat
 import tempfile
+from string import Formatter
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
@@ -127,6 +128,24 @@ def _daily_entry_content(snapshot: DictationExport, has_existing_text: bool) -> 
     )
 
 
+def _daily_template(snapshot: DictationExport) -> str:
+    day = snapshot.created_at.date()
+    values = {
+        "date": day.isoformat(),
+        "year": f"{day:%Y}",
+        "month": f"{day:%m}",
+        "day": f"{day:%d}",
+    }
+    fields = {
+        name
+        for _, name, _, _ in Formatter().parse(snapshot.destination.template)
+        if name
+    }
+    if not fields.issubset(values):
+        raise ValueError("unknown journal template field")
+    return snapshot.destination.template.format(**values)
+
+
 def _has_matching_session(path: Path, session_id: UUID) -> bool:
     """Only treat an existing note as ours when its front matter matches."""
     try:
@@ -231,8 +250,24 @@ class MarkdownExporter:
         appended only after checking the whole note for its session marker, so
         an explicit retry cannot duplicate a successful earlier append.
         """
-        target = directory / snapshot.daily_filename
-        if target.parent != directory or target.is_symlink():
+        relative = Path(snapshot.daily_filename)
+        if snapshot.destination.structure == "year_month":
+            relative = (
+                Path(f"{snapshot.created_at:%Y}")
+                / f"{snapshot.created_at:%m}"
+                / relative
+            )
+        target = directory / relative
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            parent = target.parent.resolve(strict=True)
+        except OSError:
+            parent = target.parent
+        if (
+            not parent.is_relative_to(directory)
+            or target.is_symlink()
+            or snapshot.destination.structure not in {"flat", "year_month"}
+        ):
             return ExportResult(
                 ExportStatus.FAILED,
                 None,
@@ -278,6 +313,18 @@ class MarkdownExporter:
                             "Дневная заметка содержит текст не в UTF-8",
                             retryable=True,
                         )
+                    if not existing:
+                        try:
+                            existing = _daily_template(snapshot)
+                        except ValueError:
+                            return ExportResult(
+                                ExportStatus.FAILED,
+                                None,
+                                "Шаблон дневника содержит неизвестное поле",
+                                retryable=True,
+                            )
+                        note.seek(0)
+                        note.write(existing)
                     session = str(snapshot.session_id)
                     begin = f'<!-- flowspeech_entry_begin: "{session}" -->'
                     end = f'<!-- flowspeech_entry_end: "{session}" -->'

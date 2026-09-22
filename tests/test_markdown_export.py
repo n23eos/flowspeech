@@ -318,3 +318,27 @@ def test_daily_retry_confirms_single_block_after_ambiguous_fsync_failure(
     assert retry.status is ExportStatus.SAVED
     assert content.count(f'flowspeech_entry_begin: "{SESSION_A}"') == 1
     assert content.count(f'flowspeech_entry_end: "{SESSION_A}"') == 1
+
+
+def test_daily_export_uses_configured_structure_and_template(tmp_path):
+    config = MarkdownExportConfig(
+        True,
+        tmp_path,
+        "daily",
+        structure="year_month",
+        template="# Daily {date}\n\n",
+    )
+    item = DictationExport.create(
+        session_id=SESSION_A,
+        created_at=CREATED_AT,
+        final_text="Структурированная запись",
+        destination=config,
+    )
+
+    result = MarkdownExporter(config).export(item)
+
+    assert result.status is ExportStatus.SAVED
+    assert result.path == tmp_path / "2026" / "09" / "2026-09-22.md"
+    assert result.path.read_text(encoding="utf-8").startswith(
+        "# Daily 2026-09-22\n\n"
+    )

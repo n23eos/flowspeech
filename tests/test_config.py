@@ -144,6 +144,8 @@ def test_markdown_export_defaults_to_disabled(tmp_path):
     assert config.markdown_export.enabled is False
     assert config.markdown_export.directory is None
     assert config.markdown_export.mode == "daily"
+    assert config.markdown_export.structure == "flat"
+    assert config.markdown_export.template == "# {date}\n\n"
 
 
 def test_markdown_export_loads_enabled_directory(tmp_path):
@@ -215,6 +217,24 @@ def test_save_markdown_export_persists_separate_mode(tmp_path):
     save_markdown_export(True, export_dir, path, mode="separate")
 
     assert load_config(path).markdown_export.mode == "separate"
+
+
+def test_markdown_export_loads_structure_and_template(tmp_path):
+    export_dir = tmp_path / "Dictations"
+    export_dir.mkdir()
+    path = write_config(tmp_path, VALID_YAML)
+
+    save_markdown_export(
+        True,
+        export_dir,
+        path,
+        structure="year_month",
+        template="# Daily {date}\n\n",
+    )
+
+    loaded = load_config(path).markdown_export
+    assert loaded.structure == "year_month"
+    assert loaded.template == "# Daily {date}\n\n"
 
 
 # --- app_styles (SPEC.md §A2) ------------------------------------------------

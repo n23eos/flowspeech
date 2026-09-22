@@ -5,7 +5,7 @@ from datetime import date
 import pytest
 
 from flowspeech.config import MarkdownExportConfig
-from flowspeech.journal import JournalConflict, JournalService
+from flowspeech.journal import JournalConflict, JournalIndex, JournalService
 
 
 DAY = date(2026, 9, 23)
@@ -49,3 +49,83 @@ def test_save_keeps_recovery_backup_of_previous_version(tmp_path):
 
     backup = tmp_path / ".2026-09-23.md.flowspeech-backup"
     assert backup.read_text(encoding="utf-8") == "Первая версия"
+
+
+def test_year_month_structure_and_template_are_used_for_new_note(tmp_path):
+    journal = JournalService(
+        MarkdownExportConfig(
+            True,
+            tmp_path,
+            "daily",
+            structure="year_month",
+            template="# Daily {date}\n\n",
+        )
+    )
+
+    document = journal.read(DAY)
+
+    assert document.path == tmp_path / "2026" / "09" / "2026-09-23.md"
+    assert document.text == "# Daily 2026-09-23\n\n"
+    assert document.exists is False
+
+
+@pytest.mark.parametrize(
+    ("kind", "expected"),
+    [
+        ("note", "## 10:15\n\nСтрока один\nСтрока два\n"),
+        ("task", "- [ ] Строка один\n  Строка два\n"),
+        ("idea", "## 10:15 · Идея\n\nСтрока один\nСтрока два\n"),
+    ],
+)
+def test_entry_types_have_stable_markdown(kind, expected, tmp_path):
+    from datetime import datetime
+
+    journal = service(tmp_path)
+
+    rendered = journal.format_entry(
+        "Строка один\nСтрока два", kind, datetime(2026, 9, 23, 10, 15)
+    )
+
+    assert rendered == expected
+
+
+def test_local_index_finds_external_changes_and_removes_deleted_files(tmp_path):
+    notes = tmp_path / "notes"
+    notes.mkdir()
+    path = notes / "2026-09-23.md"
+    path.write_text("Первая уникальная мысль", encoding="utf-8")
+    index = JournalIndex(notes, tmp_path / "data" / "journal-index.db")
+
+    assert index.refresh() == 1
+    assert index.search("УНИКАЛЬНАЯ")[0].path == path
+
+    path.write_text("Вторая редакция", encoding="utf-8")
+    index.refresh()
+    assert index.search("уникальная") == ()
+    assert index.search("вторая")[0].path == path
+
+    path.unlink()
+    index.refresh()
+    assert index.search("вторая") == ()
+
+
+def test_index_search_on_ten_thousand_notes(tmp_path):
+    import time
+
+    notes = tmp_path / "notes"
+    notes.mkdir()
+    for number in range(10_000):
+        (notes / f"note-{number:05d}.md").write_text(
+            f"Обычная запись {number}", encoding="utf-8"
+        )
+    target = notes / "note-09876.md"
+    target.write_text("Искомая иголка", encoding="utf-8")
+    index = JournalIndex(notes, tmp_path / "data" / "journal-index.db")
+    index.refresh()
+
+    started = time.perf_counter()
+    results = index.search("иголка")
+    elapsed = time.perf_counter() - started
+
+    assert [result.path for result in results] == [target]
+    assert elapsed < 0.5

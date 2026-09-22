@@ -48,7 +48,9 @@ class ExportQueue:
                     mode TEXT NOT NULL,
                     attempts INTEGER NOT NULL DEFAULT 0,
                     last_error TEXT,
-                    next_retry TEXT
+                    next_retry TEXT,
+                    structure TEXT NOT NULL DEFAULT 'flat',
+                    template TEXT NOT NULL DEFAULT '# {date}\n\n'
                 )
                 """
             )
@@ -60,6 +62,14 @@ class ExportQueue:
                 connection.execute(
                     "ALTER TABLE pending_exports ADD COLUMN next_retry TEXT"
                 )
+            if "structure" not in columns:
+                connection.execute(
+                    "ALTER TABLE pending_exports ADD COLUMN structure TEXT NOT NULL DEFAULT 'flat'"
+                )
+            if "template" not in columns:
+                connection.execute(
+                    "ALTER TABLE pending_exports ADD COLUMN template TEXT NOT NULL DEFAULT '# {date}\n\n'"
+                )
             connection.execute("PRAGMA user_version = 1")
 
     def enqueue(self, snapshot: DictationExport) -> None:
@@ -70,8 +80,8 @@ class ExportQueue:
             connection.execute(
                 """
                 INSERT OR IGNORE INTO pending_exports (
-                    session_id, created_at, final_text, directory, mode
-                ) VALUES (?, ?, ?, ?, ?)
+                    session_id, created_at, final_text, directory, mode, structure, template
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     str(snapshot.session_id),
@@ -79,6 +89,8 @@ class ExportQueue:
                     snapshot.final_text,
                     str(destination.directory),
                     destination.mode,
+                    destination.structure,
+                    destination.template,
                 ),
             )
 
@@ -126,7 +138,7 @@ class ExportQueue:
         with self._connect() as connection:
             rows = connection.execute(
                 """
-                SELECT session_id, created_at, final_text, directory, mode
+                SELECT session_id, created_at, final_text, directory, mode, structure, template
                 FROM pending_exports
                 ORDER BY created_at, session_id
                 """
@@ -140,7 +152,7 @@ class ExportQueue:
         with self._connect() as connection:
             rows = connection.execute(
                 """
-                SELECT session_id, created_at, final_text, directory, mode
+                SELECT session_id, created_at, final_text, directory, mode, structure, template
                 FROM pending_exports
                 WHERE next_retry IS NULL OR next_retry <= ?
                 ORDER BY created_at, session_id
@@ -160,10 +172,16 @@ class ExportQueue:
             connection.execute(
                 """
                 UPDATE pending_exports
-                SET directory = ?, mode = ?, next_retry = NULL
+                SET directory = ?, mode = ?, structure = ?, template = ?, next_retry = NULL
                 WHERE session_id = ?
                 """,
-                (str(destination.directory), destination.mode, str(session_id)),
+                (
+                    str(destination.directory),
+                    destination.mode,
+                    destination.structure,
+                    destination.template,
+                    str(session_id),
+                ),
             )
 
     def latest(self) -> DictationExport | None:
@@ -181,6 +199,8 @@ class ExportQueue:
             enabled=True,
             directory=Path(row["directory"]),
             mode=row["mode"],
+            structure=row["structure"],
+            template=row["template"],
         )
         return DictationExport.create(
             session_id=UUID(row["session_id"]),

@@ -51,6 +51,8 @@ VALID_HOTKEYS = (
 VALID_WHISPER_CLOUD = ("none", "groq")
 VALID_WHISPER_MODELS = ("tiny", "base", "small", "medium", "large-v3")
 VALID_MARKDOWN_EXPORT_MODES = ("daily", "separate")
+VALID_MARKDOWN_STRUCTURES = ("flat", "year_month")
+DEFAULT_JOURNAL_TEMPLATE = "# {date}\n\n"
 
 # Which environment variable holds the API key for each provider.
 # Ollama runs locally and needs no key.
@@ -127,6 +129,8 @@ class MarkdownExportConfig:
     enabled: bool = False
     directory: Path | None = None
     mode: str = "daily"
+    structure: str = "flat"
+    template: str = DEFAULT_JOURNAL_TEMPLATE
 
 
 @dataclass(frozen=True)
@@ -308,6 +312,8 @@ def save_markdown_export(
     path: str | Path | None = None,
     *,
     mode: str = "daily",
+    structure: str = "flat",
+    template: str = DEFAULT_JOURNAL_TEMPLATE,
 ) -> None:
     """Persist the whole optional `markdown_export:` block safely.
 
@@ -318,6 +324,10 @@ def save_markdown_export(
         raise ValueError("A directory is required when Markdown export is enabled")
     if mode not in VALID_MARKDOWN_EXPORT_MODES:
         raise ValueError(f"Unsupported Markdown export mode: {mode}")
+    if structure not in VALID_MARKDOWN_STRUCTURES:
+        raise ValueError(f"Unsupported Markdown folder structure: {structure}")
+    if not isinstance(template, str) or len(template) > 16_384:
+        raise ValueError("Markdown template must be text up to 16384 characters")
 
     import re
 
@@ -328,6 +338,8 @@ def save_markdown_export(
         "markdown_export:\n"
         f"  enabled: {'true' if enabled else 'false'}\n"
         f"  mode: {mode}\n"
+        f"  structure: {structure}\n"
+        f"  template: {json.dumps(template, ensure_ascii=False)}\n"
         f"  directory: {json.dumps(directory_value, ensure_ascii=False)}\n"
     )
     pattern = r"(?ms)^markdown_export:[ \t]*\n(?:[ \t]+.*\n?)*"
@@ -445,6 +457,16 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         if mode not in VALID_MARKDOWN_EXPORT_MODES:
             logger.warning("markdown_export.mode %r is invalid; using daily", mode)
             mode = "daily"
+        structure = export_raw.get("structure", "flat")
+        if structure not in VALID_MARKDOWN_STRUCTURES:
+            logger.warning(
+                "markdown_export.structure %r is invalid; using flat", structure
+            )
+            structure = "flat"
+        template = export_raw.get("template", DEFAULT_JOURNAL_TEMPLATE)
+        if not isinstance(template, str) or len(template) > 16_384:
+            logger.warning("markdown_export.template is invalid; using default")
+            template = DEFAULT_JOURNAL_TEMPLATE
         enabled = export_raw.get("enabled") is True and directory is not None
         if export_raw.get("enabled") is True and directory is None:
             logger.warning("markdown_export enabled without a directory; disabling it")
@@ -452,6 +474,8 @@ def load_config(path: str | Path | None = None) -> AppConfig:
             enabled=enabled,
             directory=directory,
             mode=mode,
+            structure=structure,
+            template=template,
         )
     else:
         if export_raw is not None:

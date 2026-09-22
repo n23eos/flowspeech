@@ -3,9 +3,11 @@
 import hashlib
 import os
 import shutil
+import sqlite3
 import tempfile
+from string import Formatter
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 from flowspeech.config import MarkdownExportConfig
@@ -28,6 +30,12 @@ class JournalDocument:
     exists: bool
 
 
+@dataclass(frozen=True)
+class JournalSearchResult:
+    path: Path
+    text: str
+
+
 def _digest(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
@@ -42,15 +50,37 @@ class JournalService:
             raise JournalError("Сначала включи Markdown и выбери доступную папку")
         if self._destination.mode != "daily":
             raise JournalError("Для дневника выбери режим «Дневной файл»")
-        path = validation.directory / f"{day:%Y-%m-%d}.md"
-        if path.parent != validation.directory or path.is_symlink():
+        relative = Path(f"{day:%Y-%m-%d}.md")
+        if self._destination.structure == "year_month":
+            relative = Path(f"{day:%Y}") / f"{day:%m}" / relative
+        path = validation.directory / relative
+        if not path.is_relative_to(validation.directory) or path.is_symlink():
             raise JournalError("Путь дневной заметки недопустим")
         return path
+
+    def _template_for(self, day: date) -> str:
+        values = {
+            "date": day.isoformat(),
+            "year": f"{day:%Y}",
+            "month": f"{day:%m}",
+            "day": f"{day:%d}",
+        }
+        try:
+            fields = {
+                name
+                for _, name, _, _ in Formatter().parse(self._destination.template)
+                if name
+            }
+            if not fields.issubset(values):
+                raise KeyError
+            return self._destination.template.format(**values)
+        except (KeyError, ValueError) as error:
+            raise JournalError("Шаблон дневника содержит неизвестное поле") from error
 
     def read(self, day: date) -> JournalDocument:
         path = self.path_for(day)
         if not path.exists():
-            return JournalDocument(path, "", _digest(b""), False)
+            return JournalDocument(path, self._template_for(day), _digest(b""), False)
         try:
             data = path.read_bytes()
             return JournalDocument(path, data.decode("utf-8"), _digest(data), True)
@@ -65,6 +95,10 @@ class JournalService:
 
         temporary: Path | None = None
         try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            root = Path(self._destination.directory).expanduser().resolve(strict=True)
+            if not path.parent.resolve(strict=True).is_relative_to(root):
+                raise JournalError("Путь дневной заметки вышел за выбранную папку")
             if current:
                 backup = path.parent / f".{path.name}.flowspeech-backup"
                 shutil.copy2(path, backup)
@@ -84,3 +118,138 @@ class JournalService:
         finally:
             if temporary is not None:
                 temporary.unlink(missing_ok=True)
+
+    @staticmethod
+    def format_entry(text: str, kind: str, created_at: datetime) -> str:
+        body = text.strip()
+        if not body:
+            raise JournalError("Пустую запись нельзя добавить в дневник")
+        if kind == "task":
+            lines = body.splitlines()
+            return f"- [ ] {lines[0]}\n" + "".join(
+                f"  {line}\n" for line in lines[1:]
+            )
+        if kind == "idea":
+            return f"## {created_at:%H:%M} · Идея\n\n{body}\n"
+        if kind == "note":
+            return f"## {created_at:%H:%M}\n\n{body}\n"
+        raise JournalError("Неизвестный тип записи")
+
+
+class JournalIndex:
+    """Rebuildable local index whose source of truth remains the MD files."""
+
+    def __init__(self, root: Path, database: Path):
+        self.root = Path(root).expanduser().resolve(strict=True)
+        self.database = Path(database).expanduser()
+        self.database.parent.mkdir(parents=True, exist_ok=True)
+        self._initialize()
+        os.chmod(self.database, 0o600)
+
+    def _connect(self) -> sqlite3.Connection:
+        connection = sqlite3.connect(self.database, timeout=5)
+        connection.row_factory = sqlite3.Row
+        return connection
+
+    def _initialize(self) -> None:
+        try:
+            with self._connect() as connection:
+                connection.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS journal_files (
+                        path TEXT PRIMARY KEY,
+                        mtime_ns INTEGER NOT NULL,
+                        size INTEGER NOT NULL,
+                        text TEXT NOT NULL,
+                        folded TEXT NOT NULL
+                    )
+                    """
+                )
+                connection.execute("PRAGMA user_version = 1")
+        except sqlite3.DatabaseError:
+            stamp = datetime.now().strftime("%Y%m%dT%H%M%S%f")
+            if self.database.exists():
+                os.replace(
+                    self.database,
+                    self.database.with_name(f"{self.database.stem}.corrupt-{stamp}.db"),
+                )
+            with self._connect() as connection:
+                connection.execute(
+                    """
+                    CREATE TABLE journal_files (
+                        path TEXT PRIMARY KEY,
+                        mtime_ns INTEGER NOT NULL,
+                        size INTEGER NOT NULL,
+                        text TEXT NOT NULL,
+                        folded TEXT NOT NULL
+                    )
+                    """
+                )
+                connection.execute("PRAGMA user_version = 1")
+
+    def refresh(self) -> int:
+        seen: set[str] = set()
+        changed = 0
+        with self._connect() as connection:
+            known = {
+                row["path"]: (row["mtime_ns"], row["size"])
+                for row in connection.execute(
+                    "SELECT path, mtime_ns, size FROM journal_files"
+                )
+            }
+            for path in self.root.rglob("*.md"):
+                if path.is_symlink() or not path.is_file():
+                    continue
+                relative = str(path.relative_to(self.root))
+                seen.add(relative)
+                stat_result = path.stat()
+                signature = (stat_result.st_mtime_ns, stat_result.st_size)
+                if known.get(relative) == signature:
+                    continue
+                if stat_result.st_size > 32 * 1024 * 1024:
+                    continue
+                try:
+                    text = path.read_text(encoding="utf-8")
+                except (OSError, UnicodeDecodeError):
+                    continue
+                connection.execute(
+                    """
+                    INSERT INTO journal_files(path, mtime_ns, size, text, folded)
+                    VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(path) DO UPDATE SET
+                        mtime_ns=excluded.mtime_ns,
+                        size=excluded.size,
+                        text=excluded.text,
+                        folded=excluded.folded
+                    """,
+                    (relative, *signature, text, text.casefold()),
+                )
+                changed += 1
+            missing = set(known) - seen
+            if missing:
+                connection.executemany(
+                    "DELETE FROM journal_files WHERE path = ?",
+                    ((path,) for path in missing),
+                )
+                changed += len(missing)
+        return changed
+
+    def search(self, query: str, *, limit: int = 100) -> tuple[JournalSearchResult, ...]:
+        needle = query.strip().casefold()
+        if not needle:
+            return ()
+        escaped = needle.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT path, text FROM journal_files
+                WHERE folded LIKE ? ESCAPE '\\'
+                ORDER BY path DESC
+                LIMIT ?
+                """,
+                (f"%{escaped}%", limit),
+            ).fetchall()
+        return tuple(
+            JournalSearchResult(self.root / row["path"], row["text"])
+            for row in rows
+        )

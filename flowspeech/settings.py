@@ -28,6 +28,7 @@ from AppKit import (
     NSTableView,
     NSTabView,
     NSTabViewItem,
+    NSTextField,
     NSTextView,
     NSWindow,
     NSWindowStyleMaskClosable,
@@ -409,6 +410,18 @@ def _markdown_export_tab(config: AppConfig, config_manager: ConfigManager) -> NS
     export_mode.setLabel_forSegment_("Отдельные файлы", 1)
     export_mode.setSelectedSegment_(0 if config.markdown_export.mode == "daily" else 1)
     export_mode.setTranslatesAutoresizingMaskIntoConstraints_(False)
+    structure = NSSegmentedControl.alloc().initWithFrame_(NSMakeRect(0, 0, 360, 24))
+    structure.setSegmentCount_(2)
+    structure.setLabel_forSegment_("В одной папке", 0)
+    structure.setLabel_forSegment_("Год / месяц", 1)
+    structure.setSelectedSegment_(
+        1 if config.markdown_export.structure == "year_month" else 0
+    )
+    structure.setTranslatesAutoresizingMaskIntoConstraints_(False)
+    template = NSTextField.alloc().initWithFrame_(NSMakeRect(0, 0, 360, 24))
+    template.setStringValue_(config.markdown_export.template)
+    template.setPlaceholderString_("# {date}")
+    template.setTranslatesAutoresizingMaskIntoConstraints_(False)
     status = ui.secondary("")
     path_label = ui.wrapping(
         ui.secondary(str(selected_directory) if selected_directory else "Папка не выбрана"),
@@ -424,6 +437,13 @@ def _markdown_export_tab(config: AppConfig, config_manager: ConfigManager) -> NS
     def selected_mode() -> str:
         return "daily" if export_mode.selectedSegment() == 0 else "separate"
 
+    def selected_structure() -> str:
+        return "year_month" if structure.selectedSegment() == 1 else "flat"
+
+    def update_preview() -> None:
+        relative = "2026/09/2026-09-22.md" if selected_structure() == "year_month" else "2026-09-22.md"
+        preview.setStringValue_(f"Пример пути: {relative}")
+
     def apply_selection(enable_export: bool) -> bool:
         nonlocal selected_directory
         if enable_export:
@@ -438,6 +458,8 @@ def _markdown_export_tab(config: AppConfig, config_manager: ConfigManager) -> NS
                 enable_export,
                 selected_directory,
                 mode=selected_mode(),
+                structure=selected_structure(),
+                template=str(template.stringValue()),
             )
             config_manager.reload()
         except Exception:
@@ -482,6 +504,7 @@ def _markdown_export_tab(config: AppConfig, config_manager: ConfigManager) -> NS
             status.setStringValue_(validation.message)
 
     def on_mode_change(_sender):
+        update_preview()
         if enabled.state() == 1:
             apply_selection(True)
         else:
@@ -491,6 +514,9 @@ def _markdown_export_tab(config: AppConfig, config_manager: ConfigManager) -> NS
     ui.on_action(choose, on_choose)
     ui.on_action(check, on_check)
     ui.on_action(export_mode, on_mode_change)
+    ui.on_action(structure, on_mode_change)
+    ui.on_action(template, on_mode_change)
+    update_preview()
 
     body = ui.vstack([
         ui.title("Автосохранение диктовок"),
@@ -502,6 +528,10 @@ def _markdown_export_tab(config: AppConfig, config_manager: ConfigManager) -> NS
         ui.divider(),
         ui.secondary("Формат сохранения", size=11),
         export_mode,
+        ui.secondary("Структура дневника", size=11),
+        structure,
+        ui.secondary("Шаблон нового дневного файла", size=11),
+        template,
         ui.secondary("Папка назначения", size=11),
         path_label,
         ui.hstack([choose, check]),
