@@ -146,6 +146,24 @@ class Overlay:
         _on_main(apply)
         threading.Timer(FLASH_SECONDS, lambda: self._hide_if_current(generation)).start()
 
+    def show_preview(self, text: str) -> None:
+        """Show the latest provisional text until another state replaces it."""
+        self._generation += 1
+        self._mode = "idle"
+        preview = text.strip().replace("\n", " ")
+        if len(preview) > 80:
+            preview = preview[:77] + "..."
+
+        def apply():
+            self._ensure_panel()
+            self._stop_timer()
+            self._wave.setHidden_(True)
+            self._label.setStringValue_(preview)
+            self._label.setHidden_(False)
+            self._panel.orderFrontRegardless()
+
+        _on_main(apply)
+
     def hide(self) -> None:
         self._generation += 1
         self._mode = "idle"

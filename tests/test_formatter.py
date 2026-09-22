@@ -6,7 +6,12 @@ import pytest
 
 from flowspeech import formatter
 from flowspeech.config import ProviderConfig
-from flowspeech.formatter import _build_system_prompt, format_text, verify_provider
+from flowspeech.formatter import (
+    _build_system_prompt,
+    format_text,
+    summarize_day,
+    verify_provider,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -40,6 +45,35 @@ def test_returns_raw_when_provider_is_none():
 
 def test_returns_empty_for_blank_input():
     assert format_text("   ", CLAUDE) == ""
+
+
+def test_day_summary_without_provider_stays_local():
+    summary, uses_cloud = summarize_day(
+        "# 2026-09-23\n\n## 10:00\n\nПервая мысль\n\n- [ ] Купить молоко",
+        None,
+    )
+
+    assert uses_cloud is False
+    assert "Первая мысль" in summary
+    assert "Купить молоко" in summary
+
+
+def test_day_summary_discloses_cloud_and_keeps_source_out_of_logs(monkeypatch):
+    monkeypatch.setattr(formatter, "_chat", lambda *_args: "- Готовый итог")
+
+    summary, uses_cloud = summarize_day("Секретный исходный текст", CLAUDE)
+
+    assert summary == "- Готовый итог"
+    assert uses_cloud is True
+
+
+def test_day_summary_ollama_is_local(monkeypatch):
+    monkeypatch.setattr(formatter, "_chat", lambda *_args: "- Локальный итог")
+
+    summary, uses_cloud = summarize_day("Локальный текст", OLLAMA)
+
+    assert summary == "- Локальный итог"
+    assert uses_cloud is False
 
 
 @patch("anthropic.Anthropic")

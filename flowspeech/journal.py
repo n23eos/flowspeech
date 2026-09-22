@@ -40,6 +40,50 @@ def _digest(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+VOICE_ENTRY_PREFIXES = {
+    "задача: ": "task",
+    "идея: ": "idea",
+    "заметка: ": "note",
+    "task: ": "task",
+    "idea: ": "idea",
+    "note: ": "note",
+}
+SUMMARY_BEGIN = "<!-- flowspeech_daily_summary_begin -->"
+SUMMARY_END = "<!-- flowspeech_daily_summary_end -->"
+
+
+def apply_voice_entry_prefix(text: str, *, enabled: bool) -> str:
+    """Apply only an exact opt-in prefix at the beginning of a journal entry."""
+    if not enabled:
+        return text
+    folded = text.casefold()
+    for prefix, kind in VOICE_ENTRY_PREFIXES.items():
+        if not folded.startswith(prefix):
+            continue
+        body = text[len(prefix):].strip()
+        if not body:
+            return text
+        if kind == "task":
+            lines = body.splitlines()
+            return f"- [ ] {lines[0]}" + "".join(f"\n  {line}" for line in lines[1:])
+        if kind == "idea":
+            return f"**Идея:** {body}"
+        return body
+    return text
+
+
+def upsert_daily_summary(markdown: str, summary: str) -> str:
+    """Replace only FlowSpeech's summary block and preserve every source entry."""
+    source = markdown.rstrip()
+    begin = source.find(SUMMARY_BEGIN)
+    if begin >= 0:
+        end = source.find(SUMMARY_END, begin)
+        if end >= 0:
+            source = (source[:begin] + source[end + len(SUMMARY_END):]).rstrip()
+    block = f"{SUMMARY_BEGIN}\n\n## Итог дня\n\n{summary.strip()}\n\n{SUMMARY_END}"
+    return f"{source}\n\n{block}\n" if source else f"{block}\n"
+
+
 class JournalService:
     def __init__(self, destination: MarkdownExportConfig):
         self._destination = destination

@@ -422,6 +422,12 @@ def _markdown_export_tab(config: AppConfig, config_manager: ConfigManager) -> NS
     template.setStringValue_(config.markdown_export.template)
     template.setPlaceholderString_("# {date}")
     template.setTranslatesAutoresizingMaskIntoConstraints_(False)
+    voice_prefixes = ui.push_button("Голосовые префиксы: задача, идея, заметка")
+    voice_prefixes.setButtonType_(3)
+    voice_prefixes.setState_(1 if config.markdown_export.voice_prefixes else 0)
+    live_preview = ui.push_button("Показывать текст до сохранения")
+    live_preview.setButtonType_(3)
+    live_preview.setState_(1 if config.markdown_export.live_preview else 0)
     status = ui.secondary("")
     path_label = ui.wrapping(
         ui.secondary(str(selected_directory) if selected_directory else "Папка не выбрана"),
@@ -460,6 +466,8 @@ def _markdown_export_tab(config: AppConfig, config_manager: ConfigManager) -> NS
                 mode=selected_mode(),
                 structure=selected_structure(),
                 template=str(template.stringValue()),
+                voice_prefixes=voice_prefixes.state() == 1,
+                live_preview=live_preview.state() == 1,
             )
             config_manager.reload()
         except Exception:
@@ -516,6 +524,8 @@ def _markdown_export_tab(config: AppConfig, config_manager: ConfigManager) -> NS
     ui.on_action(export_mode, on_mode_change)
     ui.on_action(structure, on_mode_change)
     ui.on_action(template, on_mode_change)
+    ui.on_action(voice_prefixes, on_mode_change)
+    ui.on_action(live_preview, on_mode_change)
     update_preview()
 
     body = ui.vstack([
@@ -532,6 +542,8 @@ def _markdown_export_tab(config: AppConfig, config_manager: ConfigManager) -> NS
         structure,
         ui.secondary("Шаблон нового дневного файла", size=11),
         template,
+        voice_prefixes,
+        live_preview,
         ui.secondary("Папка назначения", size=11),
         path_label,
         ui.hstack([choose, check]),

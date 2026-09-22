@@ -6,7 +6,7 @@ import sqlite3
 import subprocess
 import threading
 import time
-from datetime import datetime
+from datetime import date, datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from uuid import uuid4
@@ -42,6 +42,12 @@ from flowspeech.injector import (
     copy_to_clipboard,
     frontmost_app_name,
     insert_text,
+)
+from flowspeech.journal import (
+    JournalError,
+    JournalService,
+    apply_voice_entry_prefix,
+    upsert_daily_summary,
 )
 from flowspeech.license import BUY_URL, KIND_LICENSED, LicenseManager
 from flowspeech.markdown_export import (
@@ -432,6 +438,7 @@ class FlowSpeechApp(rumps.App):
             self._activate_item,
             rumps.MenuItem("📝  Записать в дневник", callback=self._on_journal_click),
             rumps.MenuItem("📖  Открыть сегодняшний дневник", callback=self._on_open_journal),
+            rumps.MenuItem("✨  Создать итог дня", callback=self._on_daily_summary_click),
             None,
             self._status_item,
             None,
@@ -489,6 +496,51 @@ class FlowSpeechApp(rumps.App):
         from flowspeech.settings import show_settings
 
         show_settings(self._config, self._stats, self._config_manager)
+
+    def _on_daily_summary_click(self, _sender) -> None:
+        try:
+            service = JournalService(self._config.markdown_export)
+            document = service.read(date.today())
+        except JournalError as error:
+            self._overlay.flash(str(error))
+            return
+        if not document.text.strip():
+            self._overlay.flash("Сегодня пока нет записей")
+            return
+
+        provider = self._config.llm.active()
+        if self._config.private_mode.enabled and provider is not None:
+            if provider.name != "ollama":
+                provider = None
+        uses_cloud = provider is not None and provider.name != "ollama"
+        if uses_cloud:
+            choice = rumps.alert(
+                "Итог дня",
+                f"Текст дневника будет отправлен провайдеру {provider.name}. Продолжить?",
+                ok="Создать итог",
+                cancel="Отмена",
+            )
+            if choice != 1:
+                return
+
+        summary, transmitted = formatter.summarize_day(document.text, provider)
+        location = "облачный провайдер" if transmitted else "локальная обработка"
+        preview = rumps.Window(
+            title="Предпросмотр итога дня",
+            message=f"Источник: {location}. Проверь текст перед сохранением.",
+            default_text=summary,
+            ok="Сохранить в дневник",
+            cancel="Отмена",
+            dimensions=(520, 220),
+        ).run()
+        if not preview.clicked:
+            return
+        try:
+            updated = upsert_daily_summary(document.text, preview.text)
+            service.save(date.today(), updated, document.digest)
+            self._overlay.flash("💾 Итог дня сохранён")
+        except JournalError as error:
+            self._overlay.flash(str(error))
 
     def _on_license_click(self, _sender) -> None:
         """Ask for a license key. rumps.Window is a modal text prompt —
@@ -969,6 +1021,9 @@ class FlowSpeechApp(rumps.App):
                 self._abort("empty")
                 return
 
+            if session_config.markdown_export.live_preview:
+                self._overlay.show_preview(transcript.text)
+
             if self._mode == MODE_COMMAND:
                 self._run_command(transcript, whisper_seconds)
                 return
@@ -1001,6 +1056,13 @@ class FlowSpeechApp(rumps.App):
             if token.cancelled:
                 self._overlay.flash("Отменено")
                 return
+            if self._mode == MODE_JOURNAL:
+                clean = apply_voice_entry_prefix(
+                    clean,
+                    enabled=session_config.markdown_export.voice_prefixes,
+                )
+            if session_config.markdown_export.live_preview:
+                self._overlay.show_preview(clean)
 
             created_at = session.created_at if session else self._session_started_at or datetime.now().astimezone()
             export_snapshot = DictationExport.create(

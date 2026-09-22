@@ -5,7 +5,13 @@ from datetime import date
 import pytest
 
 from flowspeech.config import MarkdownExportConfig
-from flowspeech.journal import JournalConflict, JournalIndex, JournalService
+from flowspeech.journal import (
+    JournalConflict,
+    JournalIndex,
+    JournalService,
+    apply_voice_entry_prefix,
+    upsert_daily_summary,
+)
 
 
 DAY = date(2026, 9, 23)
@@ -129,3 +135,41 @@ def test_index_search_on_ten_thousand_notes(tmp_path):
 
     assert [result.path for result in results] == [target]
     assert elapsed < 0.5
+
+
+@pytest.mark.parametrize(
+    ("spoken", "expected"),
+    [
+        ("задача: купить молоко", "- [ ] купить молоко"),
+        ("идея: сделать быстрый поиск", "**Идея:** сделать быстрый поиск"),
+        ("заметка: обычный текст", "обычный текст"),
+        ("task: ship release", "- [ ] ship release"),
+    ],
+)
+def test_explicit_voice_prefix_formats_entry(spoken, expected):
+    assert apply_voice_entry_prefix(spoken, enabled=True) == expected
+
+
+@pytest.mark.parametrize(
+    "spoken",
+    [
+        "задача купить молоко",
+        "моя задача: купить молоко",
+        "идея для проекта: быстрый поиск",
+        "task force is ready",
+    ],
+)
+def test_similar_phrases_are_not_commands(spoken):
+    assert apply_voice_entry_prefix(spoken, enabled=True) == spoken
+    assert apply_voice_entry_prefix("задача: купить молоко", enabled=False) == "задача: купить молоко"
+
+
+def test_daily_summary_is_replaced_without_changing_source_entries():
+    source = "# День\n\n## 10:00\n\nИсходная запись\n"
+    first = upsert_daily_summary(source, "- Первый итог")
+    second = upsert_daily_summary(first, "- Новый итог")
+
+    assert second.startswith(source)
+    assert second.count("flowspeech_daily_summary_begin") == 1
+    assert "Первый итог" not in second
+    assert "Новый итог" in second

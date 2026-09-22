@@ -18,7 +18,14 @@ import types
 
 import pytest
 
-from flowspeech.config import AppConfig, LLMConfig, MarkdownExportConfig, WhisperConfig
+from flowspeech.config import (
+    AppConfig,
+    LLMConfig,
+    MarkdownExportConfig,
+    PrivateMode,
+    ProviderConfig,
+    WhisperConfig,
+)
 from flowspeech.export_queue import ExportQueue
 from flowspeech.session import SessionToken
 from flowspeech.transcriber import Transcript
@@ -248,7 +255,17 @@ def test_listener_health_reports_revoked_accessibility(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    ("mode", "expected_message", "expect_paste", "current_app", "expect_copy"),
+    (
+        "mode",
+        "expected_message",
+        "expect_paste",
+        "current_app",
+        "expect_copy",
+        "markdown_options",
+        "formatted_text",
+        "expected_note",
+        "expected_previews",
+    ),
     [
         (
             fsmain.MODE_DICTATION,
@@ -256,14 +273,43 @@ def test_listener_health_reports_revoked_accessibility(monkeypatch):
             True,
             "unknown",
             False,
+            {},
+            "Готовая заметка",
+            "Готовая заметка",
+            [],
         ),
-        (fsmain.MODE_JOURNAL, "💾 Запись добавлена в дневник", False, "unknown", False),
+        (
+            fsmain.MODE_JOURNAL,
+            "💾 Запись добавлена в дневник",
+            False,
+            "unknown",
+            False,
+            {},
+            "Готовая заметка",
+            "Готовая заметка",
+            [],
+        ),
         (
             fsmain.MODE_DICTATION,
             "📋 Фокус изменился. Текст скопирован, вставка отменена",
             False,
             "Safari",
             True,
+            {},
+            "Готовая заметка",
+            "Готовая заметка",
+            [],
+        ),
+        (
+            fsmain.MODE_JOURNAL,
+            "💾 Запись добавлена в дневник",
+            False,
+            "unknown",
+            False,
+            {"voice_prefixes": True, "live_preview": True},
+            "задача: Купить молоко",
+            "- [ ] Купить молоко",
+            ["черновик", "- [ ] Купить молоко"],
         ),
     ],
 )
@@ -276,6 +322,10 @@ def test_pipeline_saves_markdown_and_respects_delivery_mode(
     expect_paste,
     current_app,
     expect_copy,
+    markdown_options,
+    formatted_text,
+    expected_note,
+    expected_previews,
 ):
     """The file export happens before a failed accessibility paste."""
     caplog.set_level(logging.INFO, logger=fsmain.logger.name)
@@ -287,7 +337,9 @@ def test_pipeline_saves_markdown_and_respects_delivery_mode(
         whisper=WhisperConfig("small", "ru", "auto"),
         llm=LLMConfig("none", {}),
         data_dir=tmp_path,
-        markdown_export=MarkdownExportConfig(enabled=True, directory=destination),
+        markdown_export=MarkdownExportConfig(
+            enabled=True, directory=destination, **markdown_options
+        ),
     )
     instance._recorder = types.SimpleNamespace(
         stop=lambda: types.SimpleNamespace(
@@ -298,8 +350,9 @@ def test_pipeline_saves_markdown_and_respects_delivery_mode(
         transcribe=lambda _audio, _prompt: Transcript("черновик", "ru", 1.0)
     )
     instance._overlay = types.SimpleNamespace(
-        messages=[],
+        messages=[], previews=[],
         flash=lambda message: instance._overlay.messages.append(message),
+        show_preview=lambda text: instance._overlay.previews.append(text),
         hide=lambda: None,
     )
     instance._stats = types.SimpleNamespace(record_session=lambda _session: None)
@@ -322,7 +375,9 @@ def test_pipeline_saves_markdown_and_respects_delivery_mode(
     monkeypatch.setattr(instance, "_refresh_history_menu", lambda: None)
     monkeypatch.setattr(fsmain, "load_words", lambda _directory: [])
     monkeypatch.setattr(fsmain, "load_snippets", lambda _directory: {})
-    monkeypatch.setattr(fsmain, "format_text", lambda *_args, **_kwargs: "Готовая заметка")
+    monkeypatch.setattr(
+        fsmain, "format_text", lambda *_args, **_kwargs: formatted_text
+    )
     monkeypatch.setattr(fsmain, "apply_snippets", lambda text, _snippets: text)
     monkeypatch.setattr(fsmain, "play_sound", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(fsmain.feedback, "log_entry", lambda *_args, **_kwargs: None)
@@ -344,9 +399,12 @@ def test_pipeline_saves_markdown_and_respects_delivery_mode(
 
     notes = list(destination.glob("*.md"))
     assert len(notes) == 1
-    assert "Готовая заметка" in notes[0].read_text(encoding="utf-8")
+    content = notes[0].read_text(encoding="utf-8")
+    assert expected_note in content
+    assert content.count("flowspeech_entry_begin:") == 1
     assert bool(paste_calls) is expect_paste
     assert bool(copied) is expect_copy
+    assert instance._overlay.previews == expected_previews
     assert instance._overlay.messages == [expected_message]
     timing_logs = "\n".join(record.getMessage() for record in caplog.records)
     assert "whisper=" in timing_logs
@@ -363,7 +421,9 @@ def test_cancelled_processing_discards_late_formatter_result(tmp_path, monkeypat
         whisper=WhisperConfig("small", "ru", "auto"),
         llm=LLMConfig("none", {}),
         data_dir=tmp_path,
-        markdown_export=MarkdownExportConfig(enabled=True, directory=destination),
+        markdown_export=MarkdownExportConfig(
+            enabled=True, directory=destination, live_preview=True
+        ),
     )
     instance._recorder = types.SimpleNamespace(
         stop=lambda: types.SimpleNamespace(
@@ -374,8 +434,9 @@ def test_cancelled_processing_discards_late_formatter_result(tmp_path, monkeypat
         transcribe=lambda _audio, _prompt: Transcript("черновик", "ru", 1.0)
     )
     instance._overlay = types.SimpleNamespace(
-        messages=[],
+        messages=[], previews=[],
         flash=lambda message: instance._overlay.messages.append(message),
+        show_preview=lambda text: instance._overlay.previews.append(text),
         hide=lambda: None,
     )
     instance._stats = types.SimpleNamespace(record_session=lambda _session: None)
@@ -415,3 +476,87 @@ def test_cancelled_processing_discards_late_formatter_result(tmp_path, monkeypat
     assert list(destination.glob("*.md")) == []
     assert paste_calls == []
     assert instance._overlay.messages == ["Отменено"]
+    assert instance._overlay.previews == ["черновик"]
+
+
+def _summary_app(tmp_path, *, provider="none", private=False):
+    destination = tmp_path / "notes"
+    destination.mkdir()
+    providers = {}
+    if provider != "none":
+        providers[provider] = ProviderConfig(provider, "test-model", None, "key")
+    instance = object.__new__(fsmain.FlowSpeechApp)
+    instance._config = AppConfig(
+        hotkey="right_option",
+        whisper=WhisperConfig("small", "auto", "auto"),
+        llm=LLMConfig(provider, providers),
+        data_dir=tmp_path / "data",
+        markdown_export=MarkdownExportConfig(True, destination, "daily"),
+        private_mode=PrivateMode(enabled=private),
+    )
+    instance._overlay = types.SimpleNamespace(
+        messages=[], flash=lambda message: instance._overlay.messages.append(message)
+    )
+    path = destination / f"{__import__('datetime').date.today():%Y-%m-%d}.md"
+    path.write_text("# День\n\nИсходная запись\n", encoding="utf-8")
+    return instance, path
+
+
+def test_daily_summary_can_be_cancelled_before_cloud_transfer(tmp_path, monkeypatch):
+    instance, path = _summary_app(tmp_path, provider="claude")
+    original = path.read_text(encoding="utf-8")
+    monkeypatch.setattr(fsmain.rumps, "alert", lambda *_args, **_kwargs: 0)
+    monkeypatch.setattr(
+        fsmain.formatter,
+        "summarize_day",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("cloud call must not start")),
+    )
+
+    instance._on_daily_summary_click(None)
+
+    assert path.read_text(encoding="utf-8") == original
+
+
+def test_daily_summary_private_mode_never_uses_cloud(tmp_path, monkeypatch):
+    instance, path = _summary_app(tmp_path, provider="claude", private=True)
+    providers = []
+    monkeypatch.setattr(
+        fsmain.formatter,
+        "summarize_day",
+        lambda _text, provider: providers.append(provider) or ("- Итог", False),
+    )
+    response = types.SimpleNamespace(clicked=False, text="")
+    monkeypatch.setattr(
+        fsmain.rumps,
+        "Window",
+        lambda **_kwargs: types.SimpleNamespace(run=lambda: response),
+        raising=False,
+    )
+
+    instance._on_daily_summary_click(None)
+
+    assert providers == [None]
+    assert "flowspeech_daily_summary_begin" not in path.read_text(encoding="utf-8")
+
+
+def test_confirmed_daily_summary_preserves_source_and_saves_preview(tmp_path, monkeypatch):
+    instance, path = _summary_app(tmp_path)
+    response = types.SimpleNamespace(clicked=True, text="- Проверенный итог")
+    monkeypatch.setattr(
+        fsmain.rumps,
+        "Window",
+        lambda **_kwargs: types.SimpleNamespace(run=lambda: response),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        fsmain.formatter,
+        "summarize_day",
+        lambda _text, _provider: ("- Черновик", False),
+    )
+
+    instance._on_daily_summary_click(None)
+
+    content = path.read_text(encoding="utf-8")
+    assert "Исходная запись" in content
+    assert "Проверенный итог" in content
+    assert content.count("flowspeech_daily_summary_begin") == 1

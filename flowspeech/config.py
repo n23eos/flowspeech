@@ -131,6 +131,8 @@ class MarkdownExportConfig:
     mode: str = "daily"
     structure: str = "flat"
     template: str = DEFAULT_JOURNAL_TEMPLATE
+    voice_prefixes: bool = False
+    live_preview: bool = False
 
 
 @dataclass(frozen=True)
@@ -314,6 +316,8 @@ def save_markdown_export(
     mode: str = "daily",
     structure: str = "flat",
     template: str = DEFAULT_JOURNAL_TEMPLATE,
+    voice_prefixes: bool = False,
+    live_preview: bool = False,
 ) -> None:
     """Persist the whole optional `markdown_export:` block safely.
 
@@ -340,6 +344,8 @@ def save_markdown_export(
         f"  mode: {mode}\n"
         f"  structure: {structure}\n"
         f"  template: {json.dumps(template, ensure_ascii=False)}\n"
+        f"  voice_prefixes: {'true' if voice_prefixes else 'false'}\n"
+        f"  live_preview: {'true' if live_preview else 'false'}\n"
         f"  directory: {json.dumps(directory_value, ensure_ascii=False)}\n"
     )
     pattern = r"(?ms)^markdown_export:[ \t]*\n(?:[ \t]+.*\n?)*"
@@ -476,6 +482,8 @@ def load_config(path: str | Path | None = None) -> AppConfig:
             mode=mode,
             structure=structure,
             template=template,
+            voice_prefixes=export_raw.get("voice_prefixes") is True,
+            live_preview=export_raw.get("live_preview") is True,
         )
     else:
         if export_raw is not None:
