@@ -20,6 +20,7 @@ import pytest
 
 from flowspeech.config import AppConfig, LLMConfig, MarkdownExportConfig, WhisperConfig
 from flowspeech.export_queue import ExportQueue
+from flowspeech.session import SessionToken
 from flowspeech.transcriber import Transcript
 
 
@@ -89,6 +90,9 @@ def app(monkeypatch):
     instance.finishes = 0
     instance.begins = 0
     instance.modes = []
+    instance._overlay = types.SimpleNamespace(
+        messages=[], flash=lambda message: instance._overlay.messages.append(message)
+    )
 
     def begin(mode=fsmain.MODE_DICTATION):
         instance.begins += 1
@@ -148,6 +152,7 @@ def test_keypress_during_processing_is_ignored(app):
     _hold(app, 1.0)
 
     assert (app.begins, app.finishes) == (1, 1)
+    assert app._overlay.messages == ["⏳ Предыдущая запись ещё обрабатывается"]
 
 
 def test_release_without_a_press_is_ignored(app):
@@ -213,6 +218,33 @@ def test_journal_hotkey_uses_journal_mode_when_export_is_enabled(app):
 
     assert app.modes == [fsmain.MODE_JOURNAL]
     assert (app.begins, app.finishes) == (1, 1)
+
+
+def test_listener_health_restarts_dead_listener_after_sleep(monkeypatch):
+    instance = object.__new__(fsmain.FlowSpeechApp)
+    instance._listener = types.SimpleNamespace(is_alive=False)
+    instance._active_hotkey = "right_option"
+    restarted = []
+    monkeypatch.setattr(fsmain, "is_accessibility_trusted", lambda: True)
+    monkeypatch.setattr(instance, "_start_listener", restarted.append)
+
+    instance._check_listener_health()
+
+    assert restarted == ["right_option"]
+
+
+def test_listener_health_reports_revoked_accessibility(monkeypatch):
+    instance = object.__new__(fsmain.FlowSpeechApp)
+    instance._listener = types.SimpleNamespace(is_alive=True)
+    instance._active_hotkey = "right_option"
+    instance._overlay = types.SimpleNamespace(
+        messages=[], flash=lambda message: instance._overlay.messages.append(message)
+    )
+    monkeypatch.setattr(fsmain, "is_accessibility_trusted", lambda: False)
+
+    instance._check_listener_health()
+
+    assert instance._overlay.messages == ["⚠️ FlowSpeech потерял доступ Accessibility"]
 
 
 @pytest.mark.parametrize(
@@ -294,3 +326,66 @@ def test_pipeline_saves_markdown_and_respects_delivery_mode(
     assert "whisper=" in timing_logs
     assert "export=" in timing_logs
     assert "Готовая заметка" not in timing_logs
+
+
+def test_cancelled_processing_discards_late_formatter_result(tmp_path, monkeypatch):
+    destination = tmp_path / "Dictations"
+    destination.mkdir()
+    instance = object.__new__(fsmain.FlowSpeechApp)
+    instance._config = AppConfig(
+        hotkey="right_option",
+        whisper=WhisperConfig("small", "ru", "auto"),
+        llm=LLMConfig("none", {}),
+        data_dir=tmp_path,
+        markdown_export=MarkdownExportConfig(enabled=True, directory=destination),
+    )
+    instance._recorder = types.SimpleNamespace(
+        stop=lambda: types.SimpleNamespace(
+            duration_sec=1.0, rms=0.1, reason=None, ok=True, audio=object()
+        )
+    )
+    instance._transcriber = types.SimpleNamespace(
+        transcribe=lambda _audio, _prompt: Transcript("черновик", "ru", 1.0)
+    )
+    instance._overlay = types.SimpleNamespace(
+        messages=[],
+        flash=lambda message: instance._overlay.messages.append(message),
+        hide=lambda: None,
+    )
+    instance._stats = types.SimpleNamespace(record_session=lambda _session: None)
+    instance._export_queue = ExportQueue(tmp_path)
+    instance._target_app = "TextEdit"
+    instance._active_provider = "none"
+    instance._cleanup_mode = fsmain.DEFAULT_MODE
+    instance._mode = fsmain.MODE_DICTATION
+    instance._selection = None
+    instance._session_id = None
+    instance._session_started_at = None
+    instance._session_config = None
+    instance._session_provider = None
+    instance._session_cleanup_mode = None
+    instance._session_started_monotonic = None
+    instance._session_token = SessionToken()
+    instance._state = fsmain.STATE_PROCESSING
+    instance._state_lock = threading.RLock()
+    instance._failed_markdown_export = None
+    monkeypatch.setattr(instance, "_set_state", lambda _icon: None)
+    monkeypatch.setattr(instance, "_refresh_history_menu", lambda: None)
+    monkeypatch.setattr(fsmain, "load_words", lambda _directory: [])
+    monkeypatch.setattr(fsmain, "load_snippets", lambda _directory: {})
+
+    def late_result(*_args, **_kwargs):
+        instance._session_token.cancel()
+        return "Поздний результат"
+
+    monkeypatch.setattr(fsmain, "format_text", late_result)
+    monkeypatch.setattr(fsmain, "play_sound", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(fsmain.feedback, "log_entry", lambda *_args, **_kwargs: None)
+    paste_calls = []
+    monkeypatch.setattr(fsmain, "insert_text", paste_calls.append)
+
+    instance._process_audio()
+
+    assert list(destination.glob("*.md")) == []
+    assert paste_calls == []
+    assert instance._overlay.messages == ["Отменено"]

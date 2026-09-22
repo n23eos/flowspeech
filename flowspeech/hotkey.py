@@ -91,6 +91,10 @@ class MultiHotkeyListener:
             self._listener.stop()
             self._listener = None
 
+    @property
+    def is_alive(self) -> bool:
+        return self._listener is not None and self._listener.is_alive()
+
     def _on_press(self, key) -> None:
         binding = self._bindings.get(key)
         if binding is not None and not binding.is_held:

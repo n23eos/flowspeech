@@ -46,6 +46,7 @@ from flowspeech.license import BUY_URL, KIND_LICENSED, LicenseManager
 from flowspeech.markdown_export import DictationExport, ExportStatus, MarkdownExporter
 from flowspeech.overlay import Overlay
 from flowspeech.recorder import Recorder
+from flowspeech.session import HotkeyEventDispatcher, SessionController, SessionToken
 from flowspeech.stats import SessionRecord, StatsStore
 from flowspeech.transcriber import Transcriber
 
@@ -118,7 +119,7 @@ RETRY_MARKDOWN_EXPORT_TITLE = "Повторить сохранение Markdown"
 
 MENU_ACTIVATE_IDLE = "🎙️  Начать запись"
 MENU_ACTIVATE_RECORDING = "⏹️  Остановить запись"
-MENU_ACTIVATE_PROCESSING = "⏳  Обработка…"
+MENU_ACTIVATE_PROCESSING = "✕  Отменить обработку"
 
 PROVIDER_LABELS = {
     "claude": "Claude",
@@ -241,14 +242,19 @@ class FlowSpeechApp(rumps.App):
         self._session_provider = None
         self._session_cleanup_mode = None
         self._session_started_monotonic = None
+        self._session_token = None
+        self._sessions = SessionController()
 
         self._active_hotkey = config.hotkey
         self._journal_hotkey = config.journal_hotkey
         self._listener = None
+        self._hotkey_dispatcher = HotkeyEventDispatcher()
+        self._accessibility_warning_shown = False
 
         ensure_dictionary(config.data_dir)
         self._build_menu()
         self._start_listener(config.hotkey)
+        threading.Thread(target=self._listener_watchdog, daemon=True).start()
 
         # Load the Whisper model in the background so the first dictation is
         # fast. The microphone is opened per dictation, never ahead of time.
@@ -299,15 +305,19 @@ class FlowSpeechApp(rumps.App):
         listener = MultiHotkeyListener()
         listener.bind(
             hotkey_name,
-            on_press_start=self._on_hotkey_down,
-            on_press_end=self._on_hotkey_up,
+            on_press_start=lambda: self._hotkey_dispatcher.submit(self._on_hotkey_down),
+            on_press_end=lambda: self._hotkey_dispatcher.submit(self._on_hotkey_up),
         )
         command_hotkey = self._config.command_hotkey
         if command_hotkey and command_hotkey != hotkey_name:
             listener.bind(
                 command_hotkey,
-                on_press_start=self._on_command_hotkey_down,
-                on_press_end=self._on_command_hotkey_up,
+                on_press_start=lambda: self._hotkey_dispatcher.submit(
+                    self._on_command_hotkey_down
+                ),
+                on_press_end=lambda: self._hotkey_dispatcher.submit(
+                    self._on_command_hotkey_up
+                ),
             )
         elif command_hotkey:
             logger.warning(
@@ -318,14 +328,38 @@ class FlowSpeechApp(rumps.App):
         if journal_hotkey and journal_hotkey not in {hotkey_name, command_hotkey}:
             listener.bind(
                 journal_hotkey,
-                on_press_start=self._on_journal_hotkey_down,
-                on_press_end=self._on_journal_hotkey_up,
+                on_press_start=lambda: self._hotkey_dispatcher.submit(
+                    self._on_journal_hotkey_down
+                ),
+                on_press_end=lambda: self._hotkey_dispatcher.submit(
+                    self._on_journal_hotkey_up
+                ),
             )
         elif journal_hotkey:
             logger.warning("journal_hotkey collides with another hotkey; disabled")
         listener.start()
         self._listener = listener
         self._active_hotkey = hotkey_name
+
+    def _check_listener_health(self) -> None:
+        if not is_accessibility_trusted():
+            if not getattr(self, "_accessibility_warning_shown", False):
+                self._overlay.flash("⚠️ FlowSpeech потерял доступ Accessibility")
+                self._accessibility_warning_shown = True
+            return
+        self._accessibility_warning_shown = False
+        listener = self._listener
+        if listener is None or not listener.is_alive:
+            logger.warning("Hotkey listener stopped; restarting")
+            self._start_listener(self._active_hotkey)
+
+    def _listener_watchdog(self) -> None:
+        while True:
+            time.sleep(5)
+            try:
+                self._check_listener_health()
+            except Exception:
+                logger.exception("Hotkey listener health check failed")
 
     # --- Menu -------------------------------------------------------------
 
@@ -709,15 +743,18 @@ class FlowSpeechApp(rumps.App):
             return
         self._state = STATE_RECORDING
         self._mode = mode
-        self._session_id = uuid4()
-        self._session_started_at = datetime.now().astimezone()
-        self._session_config = self._config
-        self._session_provider = self._active_provider
-        self._session_cleanup_mode = self._cleanup_mode
-        self._session_started_monotonic = activation_started
         self._selection = None
         self._press_started = time.monotonic()
         self._target_app = frontmost_app_name()
+        self._sessions.start(
+            mode=mode,
+            config=self._config,
+            provider=self._active_provider,
+            cleanup_mode=self._cleanup_mode,
+            target_app=self._target_app,
+            created_at=datetime.now().astimezone(),
+            started_monotonic=activation_started,
+        )
         if mode == MODE_COMMAND:
             # Grab the selection while the user is already speaking; the
             # recorder is running, so no audio is lost during the ~50-500 ms
@@ -740,6 +777,7 @@ class FlowSpeechApp(rumps.App):
         """Click on the menu-bar item: start, or stop a running recording."""
         with self._state_lock:
             if self._state == STATE_PROCESSING:
+                self._cancel_processing()
                 return  # a dictation is already being transcribed/cleaned up
             if self._state == STATE_RECORDING:
                 self._finish_recording()
@@ -748,6 +786,16 @@ class FlowSpeechApp(rumps.App):
             # A click always latches; the next one stops. Unless the mic
             # refused to open, in which case we are back at IDLE.
             self._latched = self._state == STATE_RECORDING
+
+    def _cancel_processing(self) -> None:
+        sessions = getattr(self, "_sessions", None)
+        cancelled = sessions.cancel() if sessions is not None else False
+        token = self._session_token
+        if not cancelled and token is not None:
+            token.cancel()
+            cancelled = True
+        if cancelled:
+            self._overlay.flash("Отмена после текущего шага")
 
     def _on_journal_click(self, _sender) -> None:
         """Start or stop a journal capture that never pastes into another app."""
@@ -793,6 +841,7 @@ class FlowSpeechApp(rumps.App):
     def _hotkey_down(self, mode: str) -> None:
         with self._state_lock:
             if self._state == STATE_PROCESSING:
+                self._overlay.flash("⏳ Предыдущая запись ещё обрабатывается")
                 return
             if self._state == STATE_RECORDING:
                 # A tap while a latched recording runs: stop and process. The
@@ -847,10 +896,17 @@ class FlowSpeechApp(rumps.App):
     def _process_audio(self) -> None:
         # State is PROCESSING for the whole of this method, so no second
         # dictation can start and interleave its paste with ours.
+        session = getattr(getattr(self, "_sessions", None), "current", None)
         try:
-            session_config = self._session_config or self._config
-            session_provider = self._session_provider or self._active_provider
-            session_cleanup_mode = self._session_cleanup_mode or self._cleanup_mode
+            session_config = session.config if session else self._session_config or self._config
+            session_provider = session.provider if session else self._session_provider or self._active_provider
+            session_cleanup_mode = (
+                session.cleanup_mode if session else self._session_cleanup_mode or self._cleanup_mode
+            )
+            token = (
+                session.token
+                if session else getattr(self, "_session_token", None) or SessionToken()
+            )
             capture = self._recorder.stop()
             logger.info(
                 "Capture: %.2fs, rms=%.5f, open=%.3fs, first_block=%.3fs, reason=%s",
@@ -869,6 +925,9 @@ class FlowSpeechApp(rumps.App):
             whisper_started = time.perf_counter()
             transcript = self._transcriber.transcribe(audio, whisper_prompt(words))
             whisper_seconds = time.perf_counter() - whisper_started
+            if token.cancelled:
+                self._overlay.flash("Отменено")
+                return
             if not transcript.text:
                 logger.info("Empty transcript, nothing to insert")
                 self._abort("empty")
@@ -895,15 +954,21 @@ class FlowSpeechApp(rumps.App):
                 translate=is_translate,
             )
             llm_seconds = time.perf_counter() - llm_started
+            if token.cancelled:
+                self._overlay.flash("Отменено")
+                return
 
             # Snippet expansion (SPEC §A5) runs on the final text, after any
             # LLM cleanup and regardless of provider — only for dictation, not
             # Command Mode (that path returns earlier).
             clean = apply_snippets(clean, load_snippets(session_config.data_dir))
+            if token.cancelled:
+                self._overlay.flash("Отменено")
+                return
 
-            created_at = self._session_started_at or datetime.now().astimezone()
+            created_at = session.created_at if session else self._session_started_at or datetime.now().astimezone()
             export_snapshot = DictationExport.create(
-                session_id=self._session_id or uuid4(),
+                session_id=session.session_id if session else self._session_id or uuid4(),
                 created_at=created_at,
                 final_text=clean,
                 destination=session_config.markdown_export,
@@ -947,7 +1012,10 @@ class FlowSpeechApp(rumps.App):
                 llm_seconds,
                 export_seconds,
                 paste_seconds,
-                time.perf_counter() - (self._session_started_monotonic or time.perf_counter()),
+                time.perf_counter() - (
+                    session.started_monotonic
+                    if session else self._session_started_monotonic or time.perf_counter()
+                ),
                 len(clean),
             )
             self._stats.record_session(SessionRecord(
@@ -968,6 +1036,8 @@ class FlowSpeechApp(rumps.App):
             logger.exception("Dictation pipeline failed")
             self._overlay.flash("⚠️ Ошибка — смотри лог в терминале")
         finally:
+            if session is not None:
+                self._sessions.finish(session.session_id)
             with self._state_lock:
                 self._state = STATE_IDLE
                 self._mode = MODE_DICTATION
@@ -978,13 +1048,15 @@ class FlowSpeechApp(rumps.App):
                 self._session_provider = None
                 self._session_cleanup_mode = None
                 self._session_started_monotonic = None
+                self._session_token = None
             self._set_state(ICON_IDLE)
 
     def _run_command(self, transcript, whisper_seconds: float) -> None:
         """Command Mode tail of the pipeline. The one hard rule (SPEC.md §A1):
         on ANY failure the user's selection stays untouched."""
-        session_config = self._session_config or self._config
-        session_provider = self._session_provider or self._active_provider
+        session = getattr(getattr(self, "_sessions", None), "current", None)
+        session_config = session.config if session else self._session_config or self._config
+        session_provider = session.provider if session else self._session_provider or self._active_provider
         provider = session_config.llm.providers.get(session_provider)
         if provider is None:  # provider switched to "none" mid-recording
             self._overlay.flash(MSG_COMMAND_NEEDS_LLM)
@@ -1010,7 +1082,9 @@ class FlowSpeechApp(rumps.App):
             len(transcript.text.split()), len(selection or ""), len(result),
         )
         self._stats.record_session(SessionRecord(
-            created_at=self._session_started_at or datetime.now().astimezone(),
+            created_at=(
+                session.created_at if session else self._session_started_at or datetime.now().astimezone()
+            ),
             duration_sec=transcript.duration_sec,
             raw_text=transcript.text,
             clean_text=result,
