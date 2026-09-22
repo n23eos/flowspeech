@@ -5,6 +5,7 @@ import pytest
 
 from flowspeech.config import WhisperConfig
 from flowspeech.transcriber import (
+    CPU_THREADS,
     PAD_SECONDS,
     SAMPLE_RATE,
     Transcript,
@@ -84,3 +85,67 @@ def test_prompt_echo_is_discarded():
 
     assert is_hallucination("Kubernetes, FlowSpeech.", prompt)
     assert not is_hallucination("Разверни FlowSpeech в Kubernetes.", prompt)
+
+
+def test_local_decode_uses_single_fast_pass(monkeypatch):
+    calls = []
+
+    class Model:
+        def transcribe(self, _audio, **kwargs):
+            calls.append(kwargs)
+            return iter(()), type("Info", (), {"language": "ru"})()
+
+    transcriber = Transcriber(WhisperConfig("small", "auto", "auto"))
+    monkeypatch.setattr(transcriber, "_load_model", lambda: Model())
+
+    transcriber._transcribe_local(np.ones(SAMPLE_RATE, dtype=np.float32), None)
+
+    assert calls[0]["beam_size"] == 1
+    assert calls[0]["temperature"] == 0.0
+    assert calls[0]["without_timestamps"] is True
+    assert calls[0]["compression_ratio_threshold"] is None
+    assert calls[0]["log_prob_threshold"] is None
+
+
+def test_cloud_failure_falls_back_and_next_session_recovers(monkeypatch):
+    monkeypatch.setenv("GROQ_API_KEY", "test-key")
+    transcriber = Transcriber(WhisperConfig("small", "auto", "auto", cloud="groq"))
+    cloud_calls = 0
+
+    def cloud(_audio, _prompt):
+        nonlocal cloud_calls
+        cloud_calls += 1
+        if cloud_calls == 1:
+            raise TimeoutError("offline")
+        return Transcript("облако снова работает", "ru", 1.0)
+
+    monkeypatch.setattr(transcriber, "_transcribe_cloud", cloud)
+    monkeypatch.setattr(
+        transcriber,
+        "_transcribe_local",
+        lambda _audio, _prompt: Transcript("локальный резерв", "ru", 1.0),
+    )
+
+    first = transcriber.transcribe(np.ones(SAMPLE_RATE, dtype=np.float32))
+    second = transcriber.transcribe(np.ones(SAMPLE_RATE, dtype=np.float32))
+
+    assert first.text == "локальный резерв"
+    assert second.text == "облако снова работает"
+
+
+def test_local_model_uses_bounded_cpu_parallelism(monkeypatch):
+    import faster_whisper
+
+    calls = []
+
+    class Model:
+        def __init__(self, *args, **kwargs):
+            calls.append((args, kwargs))
+
+    monkeypatch.setattr(faster_whisper, "WhisperModel", Model)
+    transcriber = Transcriber(WhisperConfig("small", "auto", "auto"))
+
+    transcriber._load_model()
+
+    assert calls[0][1]["cpu_threads"] == CPU_THREADS
+    assert 1 <= CPU_THREADS <= 8

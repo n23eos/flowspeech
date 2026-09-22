@@ -33,6 +33,7 @@ from flowspeech.config import WhisperConfig
 logger = logging.getLogger(__name__)
 
 SAMPLE_RATE = 16_000
+CPU_THREADS = min(8, os.cpu_count() or 4)
 
 GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 GROQ_WHISPER_MODEL = "whisper-large-v3-turbo"
@@ -135,7 +136,12 @@ class Transcriber:
 
             logger.info("Loading Whisper model '%s'…", self._config.model)
             device = self._config.device if self._config.device != "auto" else "auto"
-            self._model = WhisperModel(self._config.model, device=device, compute_type="int8")
+            self._model = WhisperModel(
+                self._config.model,
+                device=device,
+                compute_type="int8",
+                cpu_threads=CPU_THREADS,
+            )
             logger.info("Whisper model ready")
         return self._model
 
@@ -156,6 +162,10 @@ class Transcriber:
             # it can drop every segment and leave us with an empty transcript.
             vad_filter=speech_seconds > VAD_MIN_DURATION_SECONDS,
             beam_size=1,  # greedy decoding: ~2-3x faster, near-identical for dictation
+            temperature=0.0,
+            without_timestamps=True,
+            compression_ratio_threshold=None,
+            log_prob_threshold=None,
             condition_on_previous_text=False,
         )
         text = " ".join(segment.text.strip() for segment in segments).strip()

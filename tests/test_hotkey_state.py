@@ -248,14 +248,34 @@ def test_listener_health_reports_revoked_accessibility(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    ("mode", "expected_message", "expect_paste"),
+    ("mode", "expected_message", "expect_paste", "current_app", "expect_copy"),
     [
-        (fsmain.MODE_DICTATION, "⚠️ Вставка не выполнена, Markdown сохранён", True),
-        (fsmain.MODE_JOURNAL, "💾 Запись добавлена в дневник", False),
+        (
+            fsmain.MODE_DICTATION,
+            "⚠️ Вставка не выполнена, Markdown сохранён",
+            True,
+            "unknown",
+            False,
+        ),
+        (fsmain.MODE_JOURNAL, "💾 Запись добавлена в дневник", False, "unknown", False),
+        (
+            fsmain.MODE_DICTATION,
+            "📋 Фокус изменился. Текст скопирован, вставка отменена",
+            False,
+            "Safari",
+            True,
+        ),
     ],
 )
 def test_pipeline_saves_markdown_and_respects_delivery_mode(
-    tmp_path, monkeypatch, caplog, mode, expected_message, expect_paste
+    tmp_path,
+    monkeypatch,
+    caplog,
+    mode,
+    expected_message,
+    expect_paste,
+    current_app,
+    expect_copy,
 ):
     """The file export happens before a failed accessibility paste."""
     caplog.set_level(logging.INFO, logger=fsmain.logger.name)
@@ -306,6 +326,11 @@ def test_pipeline_saves_markdown_and_respects_delivery_mode(
     monkeypatch.setattr(fsmain, "apply_snippets", lambda text, _snippets: text)
     monkeypatch.setattr(fsmain, "play_sound", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(fsmain.feedback, "log_entry", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(fsmain, "frontmost_app_name", lambda: current_app)
+    copied = []
+    monkeypatch.setattr(
+        fsmain, "copy_to_clipboard", lambda text: copied.append(text) or True
+    )
 
     paste_calls = []
 
@@ -321,6 +346,7 @@ def test_pipeline_saves_markdown_and_respects_delivery_mode(
     assert len(notes) == 1
     assert "Готовая заметка" in notes[0].read_text(encoding="utf-8")
     assert bool(paste_calls) is expect_paste
+    assert bool(copied) is expect_copy
     assert instance._overlay.messages == [expected_message]
     timing_logs = "\n".join(record.getMessage() for record in caplog.records)
     assert "whisper=" in timing_logs

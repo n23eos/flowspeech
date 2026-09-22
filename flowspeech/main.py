@@ -1014,20 +1014,38 @@ class FlowSpeechApp(rumps.App):
             export_seconds = time.perf_counter() - export_started
 
             paste_failed = False
+            focus_changed = False
             paste_seconds = 0.0
             if self._mode != MODE_JOURNAL:
                 paste_started = time.perf_counter()
-                try:
-                    insert_text(clean)
-                except Exception:
+                current_app = frontmost_app_name()
+                if (
+                    self._target_app not in {"", "unknown"}
+                    and current_app not in {"", "unknown"}
+                    and current_app != self._target_app
+                ):
+                    focus_changed = True
                     paste_failed = True
-                    logger.exception("Text insertion failed; dictation remains exportable")
+                    copy_to_clipboard(clean)
+                    logger.info(
+                        "Paste suppressed because focus changed from %s to %s",
+                        self._target_app,
+                        current_app,
+                    )
+                else:
+                    try:
+                        insert_text(clean)
+                    except Exception:
+                        paste_failed = True
+                        logger.exception("Text insertion failed; dictation remains exportable")
                 paste_seconds = time.perf_counter() - paste_started
 
             if export_result.status is ExportStatus.FAILED:
                 self._overlay.flash("⚠️ Markdown в очереди - выбери «Повторить сохранение Markdown»")
             elif self._mode == MODE_JOURNAL:
                 self._overlay.flash("💾 Запись добавлена в дневник")
+            elif focus_changed:
+                self._overlay.flash("📋 Фокус изменился. Текст скопирован, вставка отменена")
             elif paste_failed:
                 if export_result.status is ExportStatus.SAVED:
                     self._overlay.flash("⚠️ Вставка не выполнена, Markdown сохранён")
