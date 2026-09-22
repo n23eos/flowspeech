@@ -139,6 +139,7 @@ class AppConfig:
     # Command Mode (SPEC.md §A1): hold, speak an editing command, release —
     # the selected text is rewritten in place. "" disables the feature.
     command_hotkey: str = "right_command"
+    journal_hotkey: str = ""
     # Per-app cleanup style (SPEC.md §A2): frontmost app name → a phrase spliced
     # into the LLM cleanup prompt (e.g. Slack → "casual, short"). The "default"
     # key applies to apps not listed. Empty when the feature is unused, and
@@ -250,6 +251,11 @@ def save_hotkey(name: str, path: str | Path | None = None) -> None:
 def save_command_hotkey(name: str, path: str | Path | None = None) -> None:
     """Persist the Command Mode hotkey back to config.yaml."""
     _save_config_value("command_hotkey", name, path)
+
+
+def save_journal_hotkey(name: str, path: str | Path | None = None) -> None:
+    """Persist the optional journal-only hotkey back to config.yaml."""
+    _save_config_value("journal_hotkey", name, path)
 
 
 def save_whisper_cloud(value: str, path: str | Path | None = None) -> None:
@@ -469,6 +475,14 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         )
         command_hotkey = ""
 
+    journal_hotkey = raw.get("journal_hotkey", "") or ""
+    if journal_hotkey and journal_hotkey not in VALID_HOTKEYS:
+        logger.warning("journal_hotkey is invalid; journal hotkey disabled")
+        journal_hotkey = ""
+    if journal_hotkey and journal_hotkey in {hotkey, command_hotkey}:
+        logger.warning("journal_hotkey collides with another hotkey; disabled")
+        journal_hotkey = ""
+
     return AppConfig(
         hotkey=hotkey,
         whisper=whisper,
@@ -476,6 +490,7 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         data_dir=data_dir,
         audio=audio,
         command_hotkey=command_hotkey,
+        journal_hotkey=journal_hotkey,
         app_styles=app_styles,
         modes=modes,
         translate_to=translate_to,

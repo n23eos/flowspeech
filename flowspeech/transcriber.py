@@ -228,8 +228,7 @@ class Transcriber:
             "Whisper[%s] %.2fs audio → %d chars",
             source, transcript.duration_sec, len(transcript.text),
         )
-        logger.debug("Whisper[%s] text → %r", source, transcript.text)
         if is_hallucination(transcript.text, initial_prompt):
-            logger.warning("Discarding Whisper hallucination: %r", transcript.text)
+            logger.warning("Discarding probable Whisper hallucination (%d chars)", len(transcript.text))
             return Transcript("", transcript.language, transcript.duration_sec)
         return transcript

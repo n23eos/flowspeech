@@ -7,6 +7,7 @@ from flowspeech.config import (
     load_config,
     save_markdown_export,
     save_hotkey,
+    save_journal_hotkey,
     save_private_mode,
     save_provider,
     save_whisper_cloud,
@@ -95,6 +96,15 @@ def test_save_hotkey_updates_value_and_keeps_comments(tmp_path):
     config = load_config(path)
     assert config.hotkey == "f13"
     assert "llm:" in path.read_text(encoding="utf-8")
+
+
+def test_journal_hotkey_loads_and_rejects_collision(tmp_path):
+    path = write_config(tmp_path, VALID_YAML + "\njournal_hotkey: f13\n")
+    assert load_config(path).journal_hotkey == "f13"
+
+    save_journal_hotkey("right_option", path)
+
+    assert load_config(path).journal_hotkey == ""
 
 
 def test_save_whisper_cloud_rewrites_nested_line_in_place(tmp_path):

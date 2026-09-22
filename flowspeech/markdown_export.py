@@ -118,9 +118,11 @@ def _daily_entry_content(snapshot: DictationExport, has_existing_text: bool) -> 
     prefix = "\n\n" if has_existing_text else ""
     body = snapshot.final_text.rstrip("\n")
     return (
-        f'{prefix}<!-- flowspeech_session: "{snapshot.session_id}" -->\n\n'
+        f'{prefix}<!-- flowspeech_entry_begin: "{snapshot.session_id}" -->\n'
+        f'<!-- flowspeech_session: "{snapshot.session_id}" -->\n\n'
         f"## {snapshot.created_at:%H:%M}\n\n"
-        f"{body}\n"
+        f"{body}\n\n"
+        f'<!-- flowspeech_entry_end: "{snapshot.session_id}" -->\n'
     )
 
 
@@ -249,14 +251,26 @@ class MarkdownExporter:
                     )
                 fcntl.flock(note.fileno(), fcntl.LOCK_EX)
                 try:
-                    marker = f'flowspeech_session: "{snapshot.session_id}"'
                     note.seek(0)
-                    if any(marker in chunk for chunk in iter(lambda: note.read(64 * 1024), "")):
+                    existing = note.read()
+                    session = str(snapshot.session_id)
+                    begin = f'<!-- flowspeech_entry_begin: "{session}" -->'
+                    end = f'<!-- flowspeech_entry_end: "{session}" -->'
+                    legacy = f'<!-- flowspeech_session: "{session}" -->'
+                    if end in existing or (legacy in existing and begin not in existing):
                         return ExportResult(
                             ExportStatus.SAVED,
                             target,
                             "Диктовка уже есть в дневной заметке",
                         )
+                    if begin in existing:
+                        recovery = directory / f".flowspeech-recovery-{session}.bak"
+                        recovery.write_text(existing, encoding="utf-8")
+                        recovery.chmod(0o600)
+                        existing = existing[: existing.index(begin)].rstrip()
+                        note.seek(0)
+                        note.truncate()
+                        note.write(existing)
                     note.seek(0, os.SEEK_END)
                     entry = _daily_entry_content(snapshot, note.tell() > 0)
                     note.write(entry)

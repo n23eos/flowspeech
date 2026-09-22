@@ -11,6 +11,7 @@ staleness check compared against the press time of the *starting* press. The
 second call reset the menu bar icon and hid the overlay mid-transcription.
 """
 
+import logging
 import sys
 import threading
 import types
@@ -18,6 +19,7 @@ import types
 import pytest
 
 from flowspeech.config import AppConfig, LLMConfig, MarkdownExportConfig, WhisperConfig
+from flowspeech.export_queue import ExportQueue
 from flowspeech.transcriber import Transcript
 
 
@@ -93,7 +95,7 @@ def app(monkeypatch):
         instance.modes.append(mode)
         instance._state = fsmain.STATE_RECORDING
         instance._mode = mode
-        instance._press_started = fsmain.time.time()
+        instance._press_started = fsmain.time.monotonic()
 
     def finish():
         instance.finishes += 1
@@ -192,8 +194,39 @@ def test_hold_after_a_completed_dictation_starts_a_new_one(app):
     assert (app.begins, app.finishes) == (2, 2)
 
 
-def test_pipeline_saves_markdown_when_paste_fails(tmp_path, monkeypatch):
+def test_500_hotkey_cycles_have_no_duplicate_finish(app):
+    for _ in range(500):
+        app._state = fsmain.STATE_IDLE
+        _hold(app, 1.0)
+
+    assert (app.begins, app.finishes) == (500, 500)
+
+
+def test_journal_hotkey_uses_journal_mode_when_export_is_enabled(app):
+    app._config = types.SimpleNamespace(
+        markdown_export=MarkdownExportConfig(enabled=True, directory=None)
+    )
+
+    app._on_journal_hotkey_down()
+    app._press_started -= 1.0
+    app._on_journal_hotkey_up()
+
+    assert app.modes == [fsmain.MODE_JOURNAL]
+    assert (app.begins, app.finishes) == (1, 1)
+
+
+@pytest.mark.parametrize(
+    ("mode", "expected_message", "expect_paste"),
+    [
+        (fsmain.MODE_DICTATION, "⚠️ Вставка не выполнена, Markdown сохранён", True),
+        (fsmain.MODE_JOURNAL, "💾 Запись добавлена в дневник", False),
+    ],
+)
+def test_pipeline_saves_markdown_and_respects_delivery_mode(
+    tmp_path, monkeypatch, caplog, mode, expected_message, expect_paste
+):
     """The file export happens before a failed accessibility paste."""
+    caplog.set_level(logging.INFO, logger=fsmain.logger.name)
     destination = tmp_path / "Dictations"
     destination.mkdir()
     instance = object.__new__(fsmain.FlowSpeechApp)
@@ -218,11 +251,18 @@ def test_pipeline_saves_markdown_when_paste_fails(tmp_path, monkeypatch):
         hide=lambda: None,
     )
     instance._stats = types.SimpleNamespace(record_session=lambda _session: None)
+    instance._export_queue = ExportQueue(tmp_path)
     instance._target_app = "TextEdit"
     instance._active_provider = "none"
     instance._cleanup_mode = fsmain.DEFAULT_MODE
-    instance._mode = fsmain.MODE_DICTATION
+    instance._mode = mode
     instance._selection = None
+    instance._session_id = None
+    instance._session_started_at = None
+    instance._session_config = None
+    instance._session_provider = None
+    instance._session_cleanup_mode = None
+    instance._session_started_monotonic = None
     instance._state = fsmain.STATE_PROCESSING
     instance._state_lock = threading.RLock()
     instance._failed_markdown_export = None
@@ -235,7 +275,10 @@ def test_pipeline_saves_markdown_when_paste_fails(tmp_path, monkeypatch):
     monkeypatch.setattr(fsmain, "play_sound", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(fsmain.feedback, "log_entry", lambda *_args, **_kwargs: None)
 
-    def paste_fails(_text):
+    paste_calls = []
+
+    def paste_fails(text):
+        paste_calls.append(text)
         raise RuntimeError("Accessibility denied")
 
     monkeypatch.setattr(fsmain, "insert_text", paste_fails)
@@ -244,5 +287,10 @@ def test_pipeline_saves_markdown_when_paste_fails(tmp_path, monkeypatch):
 
     notes = list(destination.glob("*.md"))
     assert len(notes) == 1
-    assert notes[0].read_text(encoding="utf-8").endswith("Готовая заметка\n")
-    assert instance._overlay.messages == ["⚠️ Вставка не выполнена, Markdown сохранён"]
+    assert "Готовая заметка" in notes[0].read_text(encoding="utf-8")
+    assert bool(paste_calls) is expect_paste
+    assert instance._overlay.messages == [expected_message]
+    timing_logs = "\n".join(record.getMessage() for record in caplog.records)
+    assert "whisper=" in timing_logs
+    assert "export=" in timing_logs
+    assert "Готовая заметка" not in timing_logs

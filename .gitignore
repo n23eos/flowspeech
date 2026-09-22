@@ -15,6 +15,8 @@ __pycache__/
 # Build artifacts
 build/
 dist/
+benchmarks/audio/
+benchmarks/results/
 
 # Internal working notes (not for the public repo)
 .plan.md

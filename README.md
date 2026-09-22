@@ -78,6 +78,9 @@ Menu bar:
 - Status line — "Today: N dictations · M words".
 - **7-day statistics** — dictations, words, speed, top words.
 - **Dictation history** — click to copy text to the clipboard.
+- **Record in journal** - captures a note into today's Markdown file without pasting into the active app.
+- **Open today's journal** - opens the built-in Markdown editor with conflict detection and a button for the source file.
+- **Journal hotkey** - optional dedicated key in the menu; it refuses collisions with dictation and Command Mode keys.
 - **Cleanup provider** — Claude / OpenAI / DeepSeek / Ollama / no cleanup.
 - **Hotkey** — right ⌥ / ⌘ / ⇧ / ⌃ or F13–F15. The choice is saved to config.yaml and survives restarts.
 - **Settings…** — a window with tabs: General / Dictionary / Statistics.
@@ -118,10 +121,12 @@ for every dictation.
 
 Export is off by default and is independent from clipboard insertion and the
 internal history setting. If paste fails, FlowSpeech still tries to save the
-ready text. If saving fails, use **Retry Markdown export** in the menu bar;
-the retry stays available while the app is open. Disabling export never removes
-existing notes. Any Markdown-aware editor can open the chosen folder,
-including Obsidian if you already use it.
+ready text. Completed text enters a private local delivery queue before the
+Markdown write. Failed writes survive app restarts and are retried on the next
+launch or with **Retry Markdown export**. Interrupted daily blocks are restored
+from the same session ID without duplicating a completed entry. Disabling export
+never removes existing notes. Any Markdown-aware editor can open the chosen
+folder, including Obsidian if you already use it.
 
 ## Statistics and feedback
 

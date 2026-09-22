@@ -1,14 +1,32 @@
-"""Tests for the short-utterance hardening in transcriber.py."""
+import logging
 
 import numpy as np
 import pytest
 
+from flowspeech.config import WhisperConfig
 from flowspeech.transcriber import (
     PAD_SECONDS,
     SAMPLE_RATE,
+    Transcript,
+    Transcriber,
     is_hallucination,
     pad_with_silence,
 )
+
+
+def test_transcription_logs_never_contain_dictated_text(monkeypatch, caplog):
+    transcriber = Transcriber(WhisperConfig("small", "auto", "auto"))
+    monkeypatch.setattr(
+        transcriber,
+        "_transcribe_local",
+        lambda _audio, _prompt: Transcript("очень секретная фраза", "ru", 1.0),
+    )
+    caplog.set_level(logging.DEBUG)
+
+    transcriber.transcribe(np.ones(16000, dtype=np.float32))
+
+    messages = "\n".join(record.getMessage() for record in caplog.records)
+    assert "очень секретная фраза" not in messages
 
 
 def test_pad_adds_silence_to_both_ends():

@@ -10,6 +10,7 @@ hotkey: right_option  # hold to record and release to insert; a short tap latche
 # вопрос → ответ в позицию курсора. Требует llm.provider ≠ none.
 # Пустая строка ("") отключает. Не должен совпадать с hotkey.
 command_hotkey: right_command
+journal_hotkey: ""  # optional dedicated key for notes, for example f13
 
 audio:
   # Дозапись после отпускания клавиши: последний блок ещё лежит внутри

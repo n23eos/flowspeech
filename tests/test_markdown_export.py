@@ -138,6 +138,36 @@ def test_daily_export_appends_two_dictations_to_one_note(tmp_path):
     assert "## 15:05" in content
     assert "Первая мысль" in content
     assert "Вторая мысль" in content
+    assert content.count("flowspeech_entry_end:") == 2
+
+
+def test_daily_export_recovers_partial_block_without_losing_original(tmp_path):
+    config = enabled_config(tmp_path, mode="daily")
+    target = tmp_path / "2026-09-22.md"
+    partial = (
+        "# День\n\n"
+        f'<!-- flowspeech_entry_begin: "{SESSION_A}" -->\n'
+        f'<!-- flowspeech_session: "{SESSION_A}" -->\n\n'
+        "## 14:35\n\nОборванная"
+    )
+    target.write_text(partial, encoding="utf-8")
+    item = DictationExport.create(
+        session_id=SESSION_A,
+        created_at=CREATED_AT,
+        final_text="Полная запись",
+        destination=config,
+    )
+
+    result = MarkdownExporter(config).export(item)
+
+    assert result.status is ExportStatus.SAVED
+    content = target.read_text(encoding="utf-8")
+    assert content.count("flowspeech_entry_begin:") == 1
+    assert content.count("flowspeech_entry_end:") == 1
+    assert "Полная запись" in content
+    assert "Оборванная" not in content
+    recovery = tmp_path / f".flowspeech-recovery-{SESSION_A}.bak"
+    assert recovery.read_text(encoding="utf-8") == partial
 
 
 def test_daily_export_preserves_existing_note_content(tmp_path):

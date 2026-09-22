@@ -1,0 +1,120 @@
+{"id":"ru-001","group":"ru","text":"Сегодня я проверяю качество голосовой заметки."}
+{"id":"ru-002","group":"ru","text":"Добавь новую мысль в ежедневный файл."}
+{"id":"ru-003","group":"ru","text":"После обеда нужно закончить отчёт."}
+{"id":"ru-004","group":"ru","text":"Открой заметку за прошлую среду."}
+{"id":"ru-005","group":"ru","text":"Запиши короткое напоминание о встрече."}
+{"id":"ru-006","group":"ru","text":"Вечером проверить список выполненных задач."}
+{"id":"ru-007","group":"ru","text":"Эта фраза содержит простые русские слова."}
+{"id":"ru-008","group":"ru","text":"Сохрани результат в выбранной папке."}
+{"id":"ru-009","group":"ru","text":"Проверь начало и окончание последнего слова."}
+{"id":"ru-010","group":"ru","text":"Мне нужна аккуратная пунктуация без потери смысла."}
+{"id":"ru-011","group":"ru","text":"Новая запись должна появиться только один раз."}
+{"id":"ru-012","group":"ru","text":"Перезапуск приложения не должен удалить заметку."}
+{"id":"ru-013","group":"ru","text":"Покажи сегодняшние идеи и незавершённые задачи."}
+{"id":"ru-014","group":"ru","text":"Я говорю спокойно с обычной скоростью."}
+{"id":"ru-015","group":"ru","text":"Теперь произнесу предложение немного быстрее."}
+{"id":"ru-016","group":"ru","text":"Пауза внутри фразы не завершает диктовку."}
+{"id":"ru-017","group":"ru","text":"Заметка доступна в любом редакторе Markdown."}
+{"id":"ru-018","group":"ru","text":"Исправь опечатку и сохрани обновлённый текст."}
+{"id":"ru-019","group":"ru","text":"Поиск должен находить слова во всех днях."}
+{"id":"ru-020","group":"ru","text":"Это последняя русская контрольная фраза."}
+{"id":"en-001","group":"en","text":"Today I am testing a daily voice note."}
+{"id":"en-002","group":"en","text":"Add this thought to the current journal file."}
+{"id":"en-003","group":"en","text":"Finish the report after lunch."}
+{"id":"en-004","group":"en","text":"Open the note from last Wednesday."}
+{"id":"en-005","group":"en","text":"Create a short reminder for the meeting."}
+{"id":"en-006","group":"en","text":"Review the completed tasks this evening."}
+{"id":"en-007","group":"en","text":"This sentence contains common English words."}
+{"id":"en-008","group":"en","text":"Save the result in the selected folder."}
+{"id":"en-009","group":"en","text":"Check the beginning and ending of every word."}
+{"id":"en-010","group":"en","text":"I need clean punctuation without changing the meaning."}
+{"id":"en-011","group":"en","text":"The new entry must appear exactly once."}
+{"id":"en-012","group":"en","text":"Restarting the application must preserve the note."}
+{"id":"en-013","group":"en","text":"Show today's ideas and unfinished tasks."}
+{"id":"en-014","group":"en","text":"I am speaking calmly at a normal pace."}
+{"id":"en-015","group":"en","text":"Now I will say this sentence a little faster."}
+{"id":"en-016","group":"en","text":"A pause inside the phrase does not stop dictation."}
+{"id":"en-017","group":"en","text":"The note works with any Markdown editor."}
+{"id":"en-018","group":"en","text":"Correct the typo and save the updated text."}
+{"id":"en-019","group":"en","text":"Search should find words across every day."}
+{"id":"en-020","group":"en","text":"This is the final English control phrase."}
+{"id":"mixed-001","group":"mixed","text":"Добавь issue в GitHub и сохрани ссылку."}
+{"id":"mixed-002","group":"mixed","text":"Сегодня созвон в Google Meet после обеда."}
+{"id":"mixed-003","group":"mixed","text":"Проверь pull request перед release."}
+{"id":"mixed-004","group":"mixed","text":"Новая feature должна работать offline."}
+{"id":"mixed-005","group":"mixed","text":"Сохрани API endpoint в заметке."}
+{"id":"mixed-006","group":"mixed","text":"Открой Visual Studio Code и README файл."}
+{"id":"mixed-007","group":"mixed","text":"Добавь task про backup базы данных."}
+{"id":"mixed-008","group":"mixed","text":"Проверка FlowSpeech на MacBook завершена."}
+{"id":"mixed-009","group":"mixed","text":"Используй local model для private mode."}
+{"id":"mixed-010","group":"mixed","text":"Обнови changelog после final review."}
+{"id":"mixed-011","group":"mixed","text":"Markdown export сохраняется в daily note."}
+{"id":"mixed-012","group":"mixed","text":"Запусти pytest и проверь status code."}
+{"id":"mixed-013","group":"mixed","text":"Встреча с design team назначена на завтра."}
+{"id":"mixed-014","group":"mixed","text":"Добавь keyboard shortcut для journal mode."}
+{"id":"mixed-015","group":"mixed","text":"Проверь Bluetooth microphone отдельно."}
+{"id":"mixed-016","group":"mixed","text":"Сравни local и cloud transcription."}
+{"id":"mixed-017","group":"mixed","text":"Создай commit после green test suite."}
+{"id":"mixed-018","group":"mixed","text":"Открой settings и выбери Markdown folder."}
+{"id":"mixed-019","group":"mixed","text":"Найди regression в hotkey listener."}
+{"id":"mixed-020","group":"mixed","text":"Покажи p fifty и p ninety five latency."}
+{"id":"numbers-001","group":"numbers","text":"Встреча начнётся в девять часов тридцать минут."}
+{"id":"numbers-002","group":"numbers","text":"Запиши число сорок две тысячи семьсот."}
+{"id":"numbers-003","group":"numbers","text":"Температура составляет минус пять градусов."}
+{"id":"numbers-004","group":"numbers","text":"Скидка равна двадцати пяти процентам."}
+{"id":"numbers-005","group":"numbers","text":"Версия два точка четыре точка один."}
+{"id":"numbers-006","group":"numbers","text":"Позвони мне в восемнадцать сорок пять."}
+{"id":"numbers-007","group":"numbers","text":"Заказ содержит двенадцать одинаковых позиций."}
+{"id":"numbers-008","group":"numbers","text":"Расстояние до города сто восемь километров."}
+{"id":"numbers-009","group":"numbers","text":"Бюджет проекта составляет триста долларов."}
+{"id":"numbers-010","group":"numbers","text":"Первый этап займёт семь рабочих дней."}
+{"id":"numbers-011","group":"numbers","text":"The meeting starts at nine thirty in the morning."}
+{"id":"numbers-012","group":"numbers","text":"Write down forty two thousand seven hundred."}
+{"id":"numbers-013","group":"numbers","text":"The temperature is negative five degrees."}
+{"id":"numbers-014","group":"numbers","text":"The discount equals twenty five percent."}
+{"id":"numbers-015","group":"numbers","text":"The current version is two point four point one."}
+{"id":"numbers-016","group":"numbers","text":"Call me at six forty five in the evening."}
+{"id":"numbers-017","group":"numbers","text":"The order contains twelve identical items."}
+{"id":"numbers-018","group":"numbers","text":"The city is one hundred eight kilometers away."}
+{"id":"numbers-019","group":"numbers","text":"The project budget is three hundred dollars."}
+{"id":"numbers-020","group":"numbers","text":"The first stage takes seven working days."}
+{"id":"negations-001","group":"negations","text":"Не удаляй сегодняшнюю заметку."}
+{"id":"negations-002","group":"negations","text":"Я не хочу отправлять текст в облако."}
+{"id":"negations-003","group":"negations","text":"Не закрывай приложение после записи."}
+{"id":"negations-004","group":"negations","text":"Эта задача ещё не выполнена."}
+{"id":"negations-005","group":"negations","text":"Никогда не заменяй чужую правку молча."}
+{"id":"negations-006","group":"negations","text":"Не включай микрофон в фоне."}
+{"id":"negations-007","group":"negations","text":"Я вовсе не отменял встречу."}
+{"id":"negations-008","group":"negations","text":"Не добавляй эту запись дважды."}
+{"id":"negations-009","group":"negations","text":"Нельзя терять последнее слово фразы."}
+{"id":"negations-010","group":"negations","text":"Без разрешения ничего не публикуй."}
+{"id":"negations-011","group":"negations","text":"Do not delete today's note."}
+{"id":"negations-012","group":"negations","text":"I do not want to send this text to the cloud."}
+{"id":"negations-013","group":"negations","text":"Do not close the application after recording."}
+{"id":"negations-014","group":"negations","text":"This task is not finished yet."}
+{"id":"negations-015","group":"negations","text":"Never overwrite an external edit silently."}
+{"id":"negations-016","group":"negations","text":"Do not keep the microphone open in the background."}
+{"id":"negations-017","group":"negations","text":"I did not cancel the meeting."}
+{"id":"negations-018","group":"negations","text":"Do not add this entry twice."}
+{"id":"negations-019","group":"negations","text":"The final word must not be lost."}
+{"id":"negations-020","group":"negations","text":"Do not publish anything without permission."}
+{"id":"names-001","group":"names","text":"Александра проверит FlowSpeech утром."}
+{"id":"names-002","group":"names","text":"Николай откроет Obsidian после встречи."}
+{"id":"names-003","group":"names","text":"Мария обновит PostgreSQL на сервере."}
+{"id":"names-004","group":"names","text":"Дмитрий подготовит отчёт для GitHub."}
+{"id":"names-005","group":"names","text":"Екатерина позвонит Михаилу вечером."}
+{"id":"names-006","group":"names","text":"Сергей протестирует Whisper на MacBook."}
+{"id":"names-007","group":"names","text":"Анна добавит задачу в ежедневник."}
+{"id":"names-008","group":"names","text":"Павел проверит Claude и OpenAI."}
+{"id":"names-009","group":"names","text":"Ольга отправится в Тбилиси завтра."}
+{"id":"names-010","group":"names","text":"Иван обсудит проект с командой Raincoat."}
+{"id":"names-011","group":"names","text":"Alex will review FlowSpeech in the morning."}
+{"id":"names-012","group":"names","text":"Nicholas will open Obsidian after the meeting."}
+{"id":"names-013","group":"names","text":"Maria will update PostgreSQL on the server."}
+{"id":"names-014","group":"names","text":"Daniel will prepare the GitHub report."}
+{"id":"names-015","group":"names","text":"Catherine will call Michael this evening."}
+{"id":"names-016","group":"names","text":"Sarah will test Whisper on a MacBook."}
+{"id":"names-017","group":"names","text":"Anna will add a task to the journal."}
+{"id":"names-018","group":"names","text":"Paul will compare Claude and OpenAI."}
+{"id":"names-019","group":"names","text":"Olivia is traveling to Tbilisi tomorrow."}
+{"id":"names-020","group":"names","text":"Ivan will discuss the Raincoat project."}

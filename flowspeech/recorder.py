@@ -62,6 +62,8 @@ class Capture:
     duration_sec: float
     rms: float
     reason: str | None = None
+    open_latency_sec: float = 0.0
+    first_block_sec: float = 0.0
 
     @property
     def ok(self) -> bool:
@@ -76,6 +78,9 @@ class Recorder:
         self._stream: sd.InputStream | None = None
         self._last_rms = 0.0
         self._tail_seconds = tail_seconds
+        self._started_at = 0.0
+        self._open_latency_sec = 0.0
+        self._first_block_sec = 0.0
 
     # --- Live state ---------------------------------------------------------
 
@@ -94,6 +99,8 @@ class Recorder:
         if status:
             logger.warning("Audio input status: %s", status)
         block = indata.copy().reshape(-1)
+        if self._first_block_sec == 0.0 and self._started_at:
+            self._first_block_sec = time.perf_counter() - self._started_at
         self._last_rms = audio_rms(block)
         with self._lock:
             if self._capturing:
@@ -125,8 +132,12 @@ class Recorder:
         with self._lock:
             self._chunks = []
             self._capturing = True
+            self._started_at = time.perf_counter()
+            self._open_latency_sec = 0.0
+            self._first_block_sec = 0.0
         try:
             self._open_stream()
+            self._open_latency_sec = time.perf_counter() - self._started_at
         except Exception:
             logger.exception("Could not open the audio input stream")
             with self._lock:
@@ -151,17 +162,29 @@ class Recorder:
         self._close_stream()
 
         if not chunks:
-            return Capture(None, 0.0, 0.0, reason="no_audio")
+            return self._capture(None, 0.0, 0.0, "no_audio")
 
         audio = np.concatenate(chunks)
         duration = len(audio) / SAMPLE_RATE
         rms = audio_rms(audio)
 
         if duration < MIN_CAPTURE_SECONDS:
-            return Capture(None, duration, rms, reason="too_short")
+            return self._capture(None, duration, rms, "too_short")
         if rms < SILENCE_RMS:
-            return Capture(None, duration, rms, reason="silence")
-        return Capture(audio, duration, rms)
+            return self._capture(None, duration, rms, "silence")
+        return self._capture(audio, duration, rms, None)
+
+    def _capture(
+        self, audio: np.ndarray | None, duration: float, rms: float, reason: str | None
+    ) -> Capture:
+        return Capture(
+            audio,
+            duration,
+            rms,
+            reason,
+            open_latency_sec=self._open_latency_sec,
+            first_block_sec=self._first_block_sec,
+        )
 
     def cancel(self) -> None:
         """Abandon the current capture without producing audio."""
