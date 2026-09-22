@@ -2,6 +2,7 @@
 
 import logging
 import os
+import sqlite3
 import subprocess
 import threading
 import time
@@ -43,7 +44,12 @@ from flowspeech.injector import (
     insert_text,
 )
 from flowspeech.license import BUY_URL, KIND_LICENSED, LicenseManager
-from flowspeech.markdown_export import DictationExport, ExportStatus, MarkdownExporter
+from flowspeech.markdown_export import (
+    DictationExport,
+    ExportResult,
+    ExportStatus,
+    MarkdownExporter,
+)
 from flowspeech.overlay import Overlay
 from flowspeech.recorder import Recorder
 from flowspeech.session import HotkeyEventDispatcher, SessionController, SessionToken
@@ -116,6 +122,7 @@ SOUND_DONE_VOLUME = 0.15  # barely audible confirmation
 HISTORY_MENU_TITLE = "История диктовок"
 HISTORY_LIMIT = 10
 RETRY_MARKDOWN_EXPORT_TITLE = "Повторить сохранение Markdown"
+REDIRECT_MARKDOWN_EXPORT_TITLE = "Перенаправить ожидающие Markdown"
 
 MENU_ACTIVATE_IDLE = "🎙️  Начать запись"
 MENU_ACTIVATE_RECORDING = "⏹️  Остановить запись"
@@ -434,6 +441,10 @@ class FlowSpeechApp(rumps.App):
                 RETRY_MARKDOWN_EXPORT_TITLE,
                 callback=self._on_retry_markdown_export_click,
             ),
+            rumps.MenuItem(
+                REDIRECT_MARKDOWN_EXPORT_TITLE,
+                callback=self._on_redirect_markdown_exports_click,
+            ),
             None,
             ("Провайдер очистки", provider_items),
         ]
@@ -545,7 +556,17 @@ class FlowSpeechApp(rumps.App):
 
     def _export_markdown(self, snapshot: DictationExport):
         """Persist delivery intent, then remove it only after a confirmed write."""
-        self._export_queue.enqueue(snapshot)
+        try:
+            self._export_queue.enqueue(snapshot)
+        except (OSError, sqlite3.Error) as error:
+            logger.info("Could not persist Markdown delivery intent: %s", error)
+            self._failed_markdown_export = snapshot
+            return ExportResult(
+                ExportStatus.FAILED,
+                None,
+                "Не удалось добавить Markdown-запись в очередь",
+                retryable=True,
+            )
         result = MarkdownExporter(snapshot.destination).export(snapshot)
         if result.status is ExportStatus.FAILED:
             self._failed_markdown_export = snapshot
@@ -557,7 +578,7 @@ class FlowSpeechApp(rumps.App):
 
     def _retry_pending_exports(self) -> None:
         """Recover queued Markdown writes after restart without changing destination."""
-        for snapshot in self._export_queue.pending():
+        for snapshot in self._export_queue.ready():
             result = self._export_markdown(snapshot)
             if result.status is ExportStatus.FAILED:
                 logger.info("Queued Markdown export remains pending (%s)", snapshot.session_id)
@@ -571,7 +592,22 @@ class FlowSpeechApp(rumps.App):
         if result.status is ExportStatus.SAVED:
             self._overlay.flash("💾 Markdown-заметка сохранена")
         else:
-            self._overlay.flash("⚠️ Markdown-заметка всё ещё не сохранена")
+            self._overlay.flash("⚠️ Markdown-заметка остаётся в очереди")
+
+    def _on_redirect_markdown_exports_click(self, _sender) -> None:
+        destination = self._config.markdown_export
+        if not destination.enabled or destination.directory is None:
+            self._overlay.flash("⚠️ Сначала выбери папку Markdown в настройках")
+            return
+        pending = self._export_queue.pending()
+        if not pending:
+            self._overlay.flash("Нет Markdown-заметок для перенаправления")
+            return
+        for snapshot in pending:
+            self._export_queue.redirect(snapshot.session_id, destination)
+        self._failed_markdown_export = self._export_queue.latest()
+        self._overlay.flash(f"В очереди: {len(pending)}. Запускаю сохранение")
+        threading.Thread(target=self._retry_pending_exports, daemon=True).start()
 
     def _on_hotkey_choice_click(self, sender: rumps.MenuItem) -> None:
         name = next(n for n, label in HOTKEY_LABELS.items() if label == sender.title)
@@ -989,7 +1025,7 @@ class FlowSpeechApp(rumps.App):
                 paste_seconds = time.perf_counter() - paste_started
 
             if export_result.status is ExportStatus.FAILED:
-                self._overlay.flash("⚠️ Markdown не сохранён - выбери «Повторить сохранение Markdown»")
+                self._overlay.flash("⚠️ Markdown в очереди - выбери «Повторить сохранение Markdown»")
             elif self._mode == MODE_JOURNAL:
                 self._overlay.flash("💾 Запись добавлена в дневник")
             elif paste_failed:

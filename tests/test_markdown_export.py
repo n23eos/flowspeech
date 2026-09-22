@@ -1,6 +1,7 @@
 """Tests for the opt-in, retry-safe Markdown export writer."""
 
 from datetime import datetime
+import os
 from uuid import UUID
 
 import pytest
@@ -219,3 +220,101 @@ def test_directory_validation_rejects_a_missing_path(tmp_path):
 
     assert result.ok is False
     assert "не существует" in result.message
+
+
+def test_daily_export_preserves_invalid_utf8_file(tmp_path):
+    config = enabled_config(tmp_path, mode="daily")
+    target = tmp_path / "2026-09-22.md"
+    original = b"\xff\xfeprivate"
+    target.write_bytes(original)
+    item = DictationExport.create(
+        session_id=SESSION_A,
+        created_at=CREATED_AT,
+        final_text="Новая запись",
+        destination=config,
+    )
+
+    result = MarkdownExporter(config).export(item)
+
+    assert result.status is ExportStatus.FAILED
+    assert "UTF-8" in result.message
+    assert target.read_bytes() == original
+
+
+def test_daily_export_rejects_oversized_file_without_changing_it(tmp_path):
+    config = enabled_config(tmp_path, mode="daily")
+    target = tmp_path / "2026-09-22.md"
+    with target.open("wb") as note:
+        note.truncate(33 * 1024 * 1024)
+    size = target.stat().st_size
+    item = DictationExport.create(
+        session_id=SESSION_A,
+        created_at=CREATED_AT,
+        final_text="Новая запись",
+        destination=config,
+    )
+
+    result = MarkdownExporter(config).export(item)
+
+    assert result.status is ExportStatus.FAILED
+    assert "слишком большой" in result.message
+    assert target.stat().st_size == size
+
+
+def test_daily_export_detects_inode_replacement_before_append(tmp_path, monkeypatch):
+    config = enabled_config(tmp_path, mode="daily")
+    target = tmp_path / "2026-09-22.md"
+    target.write_text("# Исходный файл", encoding="utf-8")
+    replacement = tmp_path / "replacement.md"
+    replacement.write_text("# Внешняя правка", encoding="utf-8")
+    item = DictationExport.create(
+        session_id=SESSION_A,
+        created_at=CREATED_AT,
+        final_text="Новая запись",
+        destination=config,
+    )
+    original_flock = __import__("fcntl").flock
+
+    def replace_after_lock(fd, operation):
+        original_flock(fd, operation)
+        if operation == __import__("fcntl").LOCK_EX and replacement.exists():
+            os.replace(replacement, target)
+
+    monkeypatch.setattr("flowspeech.markdown_export.fcntl.flock", replace_after_lock)
+
+    result = MarkdownExporter(config).export(item)
+
+    assert result.status is ExportStatus.FAILED
+    assert "внешним редактором" in result.message
+    assert target.read_text(encoding="utf-8") == "# Внешняя правка"
+
+
+def test_daily_retry_confirms_single_block_after_ambiguous_fsync_failure(
+    tmp_path, monkeypatch
+):
+    config = enabled_config(tmp_path, mode="daily")
+    item = DictationExport.create(
+        session_id=SESSION_A,
+        created_at=CREATED_AT,
+        final_text="Новая запись",
+        destination=config,
+    )
+    real_fsync = os.fsync
+    calls = 0
+
+    def persisted_but_uncertain(fd):
+        nonlocal calls
+        calls += 1
+        real_fsync(fd)
+        if calls == 1:
+            raise OSError("simulated acknowledgement loss")
+
+    monkeypatch.setattr("flowspeech.markdown_export.os.fsync", persisted_but_uncertain)
+    first = MarkdownExporter(config).export(item)
+    retry = MarkdownExporter(config).export(item)
+
+    content = (tmp_path / "2026-09-22.md").read_text(encoding="utf-8")
+    assert first.status is ExportStatus.FAILED
+    assert retry.status is ExportStatus.SAVED
+    assert content.count(f'flowspeech_entry_begin: "{SESSION_A}"') == 1
+    assert content.count(f'flowspeech_entry_end: "{SESSION_A}"') == 1

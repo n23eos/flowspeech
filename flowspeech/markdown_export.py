@@ -15,6 +15,7 @@ import fcntl
 from flowspeech.config import MarkdownExportConfig
 
 logger = logging.getLogger(__name__)
+MAX_DAILY_NOTE_BYTES = 32 * 1024 * 1024
 
 
 class ExportStatus(str, Enum):
@@ -251,8 +252,32 @@ class MarkdownExporter:
                     )
                 fcntl.flock(note.fileno(), fcntl.LOCK_EX)
                 try:
+                    opened = os.fstat(note.fileno())
+                    if opened.st_size > MAX_DAILY_NOTE_BYTES:
+                        return ExportResult(
+                            ExportStatus.FAILED,
+                            None,
+                            "Дневная заметка слишком большой для безопасного изменения",
+                            retryable=True,
+                        )
+                    current = target.stat()
+                    if (opened.st_dev, opened.st_ino) != (current.st_dev, current.st_ino):
+                        return ExportResult(
+                            ExportStatus.FAILED,
+                            None,
+                            "Дневная заметка заменена внешним редактором, повторите сохранение",
+                            retryable=True,
+                        )
                     note.seek(0)
-                    existing = note.read()
+                    try:
+                        existing = note.read()
+                    except UnicodeDecodeError:
+                        return ExportResult(
+                            ExportStatus.FAILED,
+                            None,
+                            "Дневная заметка содержит текст не в UTF-8",
+                            retryable=True,
+                        )
                     session = str(snapshot.session_id)
                     begin = f'<!-- flowspeech_entry_begin: "{session}" -->'
                     end = f'<!-- flowspeech_entry_end: "{session}" -->'
@@ -276,6 +301,14 @@ class MarkdownExporter:
                     note.write(entry)
                     note.flush()
                     os.fsync(note.fileno())
+                    current = target.stat()
+                    if (opened.st_dev, opened.st_ino) != (current.st_dev, current.st_ino):
+                        return ExportResult(
+                            ExportStatus.FAILED,
+                            None,
+                            "Дневная заметка заменена внешним редактором, запись осталась в очереди",
+                            retryable=True,
+                        )
                 finally:
                     fcntl.flock(note.fileno(), fcntl.LOCK_UN)
             return ExportResult(ExportStatus.SAVED, target, "Дневная Markdown-заметка сохранена")
