@@ -28,7 +28,13 @@ class ExportQueue:
     def _initialize(self) -> None:
         try:
             self._create_or_migrate_schema()
-        except sqlite3.DatabaseError:
+        except sqlite3.DatabaseError as error:
+            corruption_codes = {
+                getattr(sqlite3, "SQLITE_CORRUPT", 11),
+                getattr(sqlite3, "SQLITE_NOTADB", 26),
+            }
+            if getattr(error, "sqlite_errorcode", None) not in corruption_codes:
+                raise
             if not self.path.exists():
                 raise
             stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")

@@ -5,6 +5,8 @@ import sqlite3
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
+import pytest
+
 from flowspeech.config import MarkdownExportConfig
 from flowspeech.export_queue import ExportQueue
 from flowspeech.markdown_export import DictationExport
@@ -78,6 +80,23 @@ def test_corrupt_queue_is_preserved_and_recreated(tmp_path):
     assert queue.pending() == ()
     with sqlite3.connect(queue.path) as connection:
         assert connection.execute("PRAGMA user_version").fetchone()[0] == 1
+
+
+def test_transient_database_error_does_not_replace_queue(tmp_path, monkeypatch):
+    data_dir = tmp_path / "data"
+    queue = ExportQueue(data_dir)
+    original = queue.path.read_bytes()
+
+    def locked(_self):
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(ExportQueue, "_create_or_migrate_schema", locked)
+
+    with pytest.raises(sqlite3.OperationalError, match="locked"):
+        ExportQueue(data_dir)
+
+    assert queue.path.read_bytes() == original
+    assert list(data_dir.glob("markdown-queue.corrupt-*.db")) == []
 
 
 def test_failed_item_waits_for_backoff_and_can_be_forced(tmp_path):

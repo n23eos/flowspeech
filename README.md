@@ -13,6 +13,9 @@
 - Statistics: words, speed (WPM), top words, per-application breakdown.
 - Personal dictionary and feedback log.
 - Optional Markdown export: add completed dictations to one daily note or create a separate note in a selected folder.
+- Built-in daily journal with calendar navigation, safe editing, note/task/idea entries and local search.
+- Durable Markdown delivery queue with retry, backoff, recovery copies and explicit destination redirect.
+- Optional raw/clean preview, strict voice prefixes and a reviewed daily summary.
 - Live waveform overlay on screen while recording.
 - Two modes: push-to-talk (hold) and toggle (short tap starts recording until the next tap).
 - Builds into a real FlowSpeech.app with its own icon and launch-at-login support.
@@ -80,6 +83,7 @@ Menu bar:
 - **Dictation history** — click to copy text to the clipboard.
 - **Record in journal** - captures a note into today's Markdown file without pasting into the active app.
 - **Open today's journal** - opens the built-in Markdown editor with conflict detection and a button for the source file.
+- **Create daily summary** - previews a local or provider-generated summary before saving it. Cloud transfer requires confirmation first.
 - **Journal hotkey** - optional dedicated key in the menu; it refuses collisions with dictation and Command Mode keys.
 - **Cleanup provider** — Claude / OpenAI / DeepSeek / Ollama / no cleanup.
 - **Hotkey** — right ⌥ / ⌘ / ⇧ / ⌃ or F13–F15. The choice is saved to config.yaml and survives restarts.
@@ -119,6 +123,18 @@ completed ordinary dictation to a UTF-8 file named `YYYY-MM-DD.md`, with a
 time heading and a stable session ID. The other format creates a separate file
 for every dictation.
 
+The Markdown settings also control the daily template and folder layout. Keep
+the compatible flat layout or choose `YYYY/MM/YYYY-MM-DD.md` for new entries.
+Existing files are never moved. The **Journal** window lets you move between
+days, edit the source Markdown, add a note, checkbox task or idea, search the
+local index and open the file in another editor. External edits are detected
+before save.
+
+Optional voice prefixes work only when enabled and written as an exact prefix:
+`task:`, `idea:`, `note:`, `задача:`, `идея:` or `заметка:`. A phrase such as
+"my task: review this" stays ordinary text. Optional preview shows raw and
+cleaned text before the single final Markdown block is written.
+
 Export is off by default and is independent from clipboard insertion and the
 internal history setting. If paste fails, FlowSpeech still tries to save the
 ready text. Completed text enters a private local delivery queue before the
@@ -127,6 +143,9 @@ launch or with **Retry Markdown export**. Interrupted daily blocks are restored
 from the same session ID without duplicating a completed entry. Disabling export
 never removes existing notes. Any Markdown-aware editor can open the chosen
 folder, including Obsidian if you already use it.
+
+Recovery steps and the queue export command are documented in
+[`docs/RECOVERY.md`](docs/RECOVERY.md).
 
 ## Statistics and feedback
 
@@ -180,7 +199,7 @@ right option released → faster-whisper (local) → raw transcript
 
 ## Privacy
 
-Audio never leaves your machine unless you explicitly enable cloud transcription (`whisper.cloud: groq`) or an LLM cleanup provider. With `llm.provider: none` and local Whisper, everything is fully offline.
+Audio never leaves your machine unless you explicitly enable cloud transcription (`whisper.cloud: groq`). Transcript text can leave the machine when an LLM cleanup provider is enabled. A cloud daily summary asks before sending the day's note. Private mode blocks cloud summary transfer. With `llm.provider: none` and local Whisper, everything is fully offline.
 
 ## License
 

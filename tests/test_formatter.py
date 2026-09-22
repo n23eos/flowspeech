@@ -294,6 +294,22 @@ def test_llm_answering_the_dictation_falls_back_to_raw(openai_cls):
 
 
 @patch("openai.OpenAI")
+def test_rejected_cleanup_log_does_not_contain_transcript(openai_cls, caplog):
+    secret = "what is confidential project saffron status"
+    client = openai_cls.return_value
+    client.chat.completions.create.return_value = mock_openai_response(
+        "Here is an unrelated and very long assistant response with private advice."
+    )
+    caplog.set_level("WARNING")
+
+    assert format_text(secret, OLLAMA) == secret
+
+    messages = "\n".join(record.getMessage() for record in caplog.records)
+    assert secret not in messages
+    assert "private advice" not in messages
+
+
+@patch("openai.OpenAI")
 def test_the_question_itself_is_kept_when_merely_cleaned(openai_cls):
     client = openai_cls.return_value
     client.chat.completions.create.return_value = mock_openai_response(

@@ -11,7 +11,7 @@ from datetime import date, datetime
 from pathlib import Path
 
 from flowspeech.config import MarkdownExportConfig
-from flowspeech.markdown_export import validate_export_directory
+from flowspeech.markdown_export import ensure_safe_subdirectory, validate_export_directory
 
 
 class JournalError(RuntimeError):
@@ -135,14 +135,19 @@ class JournalService:
         path = self.path_for(day)
         current = path.read_bytes() if path.exists() else b""
         if _digest(current) != expected_digest:
+            stamp = datetime.now().strftime("%Y%m%dT%H%M%S%f")
+            conflict = path.parent / f".{path.name}.flowspeech-conflict-{stamp}.md"
+            fd = os.open(conflict, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                stream.write(text)
+                stream.flush()
+                os.fsync(stream.fileno())
             raise JournalConflict("Файл изменён в другом редакторе. Перезагрузи его перед сохранением")
 
         temporary: Path | None = None
         try:
-            path.parent.mkdir(parents=True, exist_ok=True)
             root = Path(self._destination.directory).expanduser().resolve(strict=True)
-            if not path.parent.resolve(strict=True).is_relative_to(root):
-                raise JournalError("Путь дневной заметки вышел за выбранную папку")
+            ensure_safe_subdirectory(root, path.relative_to(root).parent)
             if current:
                 backup = path.parent / f".{path.name}.flowspeech-backup"
                 shutil.copy2(path, backup)
@@ -210,7 +215,13 @@ class JournalIndex:
                     """
                 )
                 connection.execute("PRAGMA user_version = 1")
-        except sqlite3.DatabaseError:
+        except sqlite3.DatabaseError as error:
+            corruption_codes = {
+                getattr(sqlite3, "SQLITE_CORRUPT", 11),
+                getattr(sqlite3, "SQLITE_NOTADB", 26),
+            }
+            if getattr(error, "sqlite_errorcode", None) not in corruption_codes:
+                raise
             stamp = datetime.now().strftime("%Y%m%dT%H%M%S%f")
             if self.database.exists():
                 os.replace(

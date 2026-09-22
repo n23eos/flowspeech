@@ -342,3 +342,25 @@ def test_daily_export_uses_configured_structure_and_template(tmp_path):
     assert result.path.read_text(encoding="utf-8").startswith(
         "# Daily 2026-09-22\n\n"
     )
+
+
+def test_year_month_export_never_creates_through_symlink(tmp_path):
+    root = tmp_path / "notes"
+    outside = tmp_path / "outside"
+    root.mkdir()
+    outside.mkdir()
+    (root / "2026").symlink_to(outside, target_is_directory=True)
+    config = MarkdownExportConfig(
+        True, root, "daily", structure="year_month"
+    )
+    item = DictationExport.create(
+        session_id=SESSION_A,
+        created_at=CREATED_AT,
+        final_text="Не выходить из папки",
+        destination=config,
+    )
+
+    result = MarkdownExporter(config).export(item)
+
+    assert result.status is ExportStatus.FAILED
+    assert list(outside.iterdir()) == []

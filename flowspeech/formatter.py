@@ -271,9 +271,12 @@ def format_text(
     rejected = is_too_long(raw, cleaned) if translate else looks_like_an_answer(raw, cleaned)
     if rejected:
         logger.warning(
-            "LLM (%s) output rejected (translate=%s); inserting the raw "
-            "transcript. raw=%r cleaned=%r",
-            provider.name, translate, raw, cleaned,
+            "LLM (%s) output rejected (translate=%s); inserting raw transcript "
+            "(%d input chars, %d output chars)",
+            provider.name,
+            translate,
+            len(raw),
+            len(cleaned),
         )
         return raw
     return cleaned

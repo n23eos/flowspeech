@@ -104,6 +104,25 @@ def validate_export_directory(directory: Path | None) -> DestinationValidation:
         return DestinationValidation(False, None, "В выбранную папку нельзя записать заметку")
 
 
+def ensure_safe_subdirectory(root: Path, relative: Path) -> Path:
+    """Create a relative directory without following an existing symlink."""
+    current = root
+    for part in relative.parts:
+        if part in {"", "."}:
+            continue
+        if part == "..":
+            raise OSError("parent traversal is not allowed")
+        current = current / part
+        if current.exists() or current.is_symlink():
+            if current.is_symlink() or not current.is_dir():
+                raise OSError("journal directory component is not a real directory")
+        else:
+            current.mkdir(mode=0o700)
+    if not current.resolve(strict=True).is_relative_to(root):
+        raise OSError("journal directory escaped selected root")
+    return current
+
+
 def _note_content(snapshot: DictationExport) -> str:
     body = snapshot.final_text.rstrip("\n")
     return (
@@ -259,10 +278,14 @@ class MarkdownExporter:
             )
         target = directory / relative
         try:
-            target.parent.mkdir(parents=True, exist_ok=True)
-            parent = target.parent.resolve(strict=True)
+            parent = ensure_safe_subdirectory(directory, relative.parent)
         except OSError:
-            parent = target.parent
+            return ExportResult(
+                ExportStatus.FAILED,
+                None,
+                "Путь дневной заметки недопустим",
+                retryable=True,
+            )
         if (
             not parent.is_relative_to(directory)
             or target.is_symlink()

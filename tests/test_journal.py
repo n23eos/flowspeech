@@ -43,6 +43,10 @@ def test_external_change_causes_conflict_and_is_preserved(tmp_path):
         journal.save(DAY, "Моя правка", opened.digest)
 
     assert path.read_text(encoding="utf-8") == "Внешняя правка"
+    conflicts = list(tmp_path.glob(".2026-09-23.md.flowspeech-conflict-*.md"))
+    assert len(conflicts) == 1
+    assert conflicts[0].read_text(encoding="utf-8") == "Моя правка"
+    assert conflicts[0].stat().st_mode & 0o777 == 0o600
 
 
 def test_save_keeps_recovery_backup_of_previous_version(tmp_path):
