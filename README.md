@@ -12,6 +12,7 @@
 - Text cleanup (filler words, punctuation, mistakes) via Claude / OpenAI / DeepSeek / Ollama, switchable right from the menu bar.
 - Statistics: words, speed (WPM), top words, per-application breakdown.
 - Personal dictionary and feedback log.
+- Optional Markdown export: add completed dictations to one daily note or create a separate note in a selected folder.
 - Live waveform overlay on screen while recording.
 - Two modes: push-to-talk (hold) and toggle (short tap starts recording until the next tap).
 - Builds into a real FlowSpeech.app with its own icon and launch-at-login support.
@@ -106,6 +107,21 @@ words:
 ```
 
 The words are hinted both to Whisper (during recognition) and to the LLM (during cleanup).
+
+## Daily Markdown export
+
+Open **Settings… → Markdown**, choose a folder, press **Check**, choose a
+format, then enable automatic saving. The default format appends every
+completed ordinary dictation to a UTF-8 file named `YYYY-MM-DD.md`, with a
+time heading and a stable session ID. The other format creates a separate file
+for every dictation.
+
+Export is off by default and is independent from clipboard insertion and the
+internal history setting. If paste fails, FlowSpeech still tries to save the
+ready text. If saving fails, use **Retry Markdown export** in the menu bar;
+the retry stays available while the app is open. Disabling export never removes
+existing notes. Any Markdown-aware editor can open the chosen folder,
+including Obsidian if you already use it.
 
 ## Statistics and feedback
 

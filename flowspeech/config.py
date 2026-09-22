@@ -1,6 +1,7 @@
 """Load and validate config.yaml. All config objects are immutable."""
 
 import logging
+import json
 import os
 import shutil
 from dataclasses import dataclass, field
@@ -49,6 +50,7 @@ VALID_HOTKEYS = (
 )
 VALID_WHISPER_CLOUD = ("none", "groq")
 VALID_WHISPER_MODELS = ("tiny", "base", "small", "medium", "large-v3")
+VALID_MARKDOWN_EXPORT_MODES = ("daily", "separate")
 
 # Which environment variable holds the API key for each provider.
 # Ollama runs locally and needs no key.
@@ -115,6 +117,19 @@ class PrivateMode:
 
 
 @dataclass(frozen=True)
+class MarkdownExportConfig:
+    """An explicit user-owned destination for final Markdown dictations.
+
+    This is separate from `paths.data_dir` and history retention: internal
+    storage must never silently turn on user-visible file export.
+    """
+
+    enabled: bool = False
+    directory: Path | None = None
+    mode: str = "daily"
+
+
+@dataclass(frozen=True)
 class AppConfig:
     hotkey: str
     whisper: WhisperConfig
@@ -146,6 +161,7 @@ class AppConfig:
     history_retention_days: int = 30
     # Private mode (SPEC.md §4.3): 100% offline. See PrivateMode.
     private_mode: PrivateMode = PrivateMode()
+    markdown_export: MarkdownExportConfig = MarkdownExportConfig()
 
     def app_style_for(self, app_name: str) -> str:
         """Cleanup style for the frontmost app, or the "default" entry.
@@ -280,6 +296,41 @@ def save_private_mode(
     target.write_text(text, encoding="utf-8")
 
 
+def save_markdown_export(
+    enabled: bool,
+    directory: Path | None,
+    path: str | Path | None = None,
+    *,
+    mode: str = "daily",
+) -> None:
+    """Persist the whole optional `markdown_export:` block safely.
+
+    The destination is written as a JSON string, which is also valid YAML and
+    preserves spaces and Cyrillic without relying on a hand-escaped scalar.
+    """
+    if enabled and directory is None:
+        raise ValueError("A directory is required when Markdown export is enabled")
+    if mode not in VALID_MARKDOWN_EXPORT_MODES:
+        raise ValueError(f"Unsupported Markdown export mode: {mode}")
+
+    import re
+
+    target = Path(path) if path is not None else config_path()
+    text = target.read_text(encoding="utf-8")
+    directory_value = "" if directory is None else str(directory)
+    block = (
+        "markdown_export:\n"
+        f"  enabled: {'true' if enabled else 'false'}\n"
+        f"  mode: {mode}\n"
+        f"  directory: {json.dumps(directory_value, ensure_ascii=False)}\n"
+    )
+    pattern = r"(?ms)^markdown_export:[ \t]*\n(?:[ \t]+.*\n?)*"
+    if re.search(pattern, text):
+        text = re.sub(pattern, "", text, count=1)
+    text = text.rstrip("\n") + "\n\n" + block
+    target.write_text(text, encoding="utf-8")
+
+
 def load_config(path: str | Path | None = None) -> AppConfig:
     """Read config.yaml, validate it, and pull API keys from the environment."""
     load_dotenv()  # pick up keys from .env if present
@@ -378,6 +429,29 @@ def load_config(path: str | Path | None = None) -> AppConfig:
     else:
         private_mode = PrivateMode()
 
+    export_raw = raw.get("markdown_export")
+    if isinstance(export_raw, dict):
+        raw_directory = export_raw.get("directory")
+        directory = None
+        if isinstance(raw_directory, str) and raw_directory.strip():
+            directory = Path(raw_directory).expanduser()
+        mode = export_raw.get("mode", "daily")
+        if mode not in VALID_MARKDOWN_EXPORT_MODES:
+            logger.warning("markdown_export.mode %r is invalid; using daily", mode)
+            mode = "daily"
+        enabled = export_raw.get("enabled") is True and directory is not None
+        if export_raw.get("enabled") is True and directory is None:
+            logger.warning("markdown_export enabled without a directory; disabling it")
+        markdown_export = MarkdownExportConfig(
+            enabled=enabled,
+            directory=directory,
+            mode=mode,
+        )
+    else:
+        if export_raw is not None:
+            logger.warning("markdown_export is not a mapping; disabling it")
+        markdown_export = MarkdownExportConfig()
+
     # Command Mode is optional: a broken value must not stop dictation from
     # starting, so it degrades to "disabled" with a logged warning instead of
     # raising like the mandatory sections above.
@@ -407,4 +481,5 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         translate_to=translate_to,
         history_retention_days=history_retention_days,
         private_mode=private_mode,
+        markdown_export=markdown_export,
     )

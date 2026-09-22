@@ -99,6 +99,15 @@ translate_to:
 # всегда — стираются только сами тексты. Ротация выполняется при запуске.
 history_retention_days: 30
 
+# Автосохранение итоговых диктовок в Markdown. По умолчанию выключено.
+# Режим daily добавляет блоки в один файл YYYY-MM-DD.md в выбранной папке.
+# Режим separate создаёт отдельный файл на каждую диктовку. Срок хранения
+# внутренней истории не включает этот экспорт сам по себе.
+markdown_export:
+  enabled: false
+  mode: daily
+  directory: ""
+
 paths:
   data_dir: ~/.flowspeech   # stats.db, dictionary.yaml, feedback.jsonl live here
 

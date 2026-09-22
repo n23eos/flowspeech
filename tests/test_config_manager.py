@@ -5,7 +5,7 @@ import textwrap
 
 import pytest
 
-from flowspeech.config import ConfigError, load_config
+from flowspeech.config import ConfigError, load_config, save_markdown_export
 from flowspeech.config_manager import ConfigManager
 
 CONFIG_TEMPLATE = textwrap.dedent(
@@ -65,3 +65,18 @@ def test_failing_subscriber_does_not_block_others(config_file):
     manager.subscribe(seen.append)
     manager.reload()
     assert len(seen) == 1
+
+
+def test_reload_notifies_subscribers_about_markdown_export(config_file, tmp_path):
+    manager = ConfigManager(load_config())
+    seen = []
+    manager.subscribe(seen.append)
+    destination = tmp_path / "Dictations"
+    destination.mkdir()
+
+    save_markdown_export(True, destination, config_file)
+    new_config = manager.reload()
+
+    assert new_config.markdown_export.enabled is True
+    assert new_config.markdown_export.directory == destination
+    assert seen == [new_config]

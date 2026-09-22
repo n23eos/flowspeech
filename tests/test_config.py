@@ -5,6 +5,7 @@ import pytest
 from flowspeech.config import (
     ConfigError,
     load_config,
+    save_markdown_export,
     save_hotkey,
     save_private_mode,
     save_provider,
@@ -122,6 +123,88 @@ def test_provider_none_needs_no_key(tmp_path, monkeypatch):
     config = load_config(path)
 
     assert config.llm.active() is None
+
+
+# --- Markdown export --------------------------------------------------------
+
+
+def test_markdown_export_defaults_to_disabled(tmp_path):
+    config = load_config(write_config(tmp_path, VALID_YAML))
+
+    assert config.markdown_export.enabled is False
+    assert config.markdown_export.directory is None
+    assert config.markdown_export.mode == "daily"
+
+
+def test_markdown_export_loads_enabled_directory(tmp_path):
+    export_dir = tmp_path / "Dictations"
+    export_dir.mkdir()
+    path = write_config(
+        tmp_path,
+        VALID_YAML + f"\nmarkdown_export:\n  enabled: true\n  directory: {export_dir}\n",
+    )
+
+    config = load_config(path)
+
+    assert config.markdown_export.enabled is True
+    assert config.markdown_export.directory == export_dir
+
+
+def test_malformed_markdown_export_is_safely_disabled(tmp_path):
+    config = load_config(write_config(tmp_path, VALID_YAML + "\nmarkdown_export: 42\n"))
+
+    assert config.markdown_export.enabled is False
+    assert config.markdown_export.directory is None
+
+
+def test_enabled_markdown_export_without_directory_is_disabled(tmp_path):
+    config = load_config(
+        write_config(tmp_path, VALID_YAML + "\nmarkdown_export:\n  enabled: true\n")
+    )
+
+    assert config.markdown_export.enabled is False
+
+
+def test_history_retention_zero_does_not_enable_markdown_export(tmp_path):
+    config = load_config(write_config(tmp_path, VALID_YAML + "\nhistory_retention_days: 0\n"))
+
+    assert config.history_retention_days == 0
+    assert config.markdown_export.enabled is False
+
+
+def test_save_markdown_export_rewrites_only_its_block(tmp_path):
+    export_dir = tmp_path / "Заметки"
+    export_dir.mkdir()
+    path = write_config(tmp_path, VALID_YAML + "\n# keep this comment\n")
+
+    save_markdown_export(True, export_dir, path)
+
+    config = load_config(path)
+    assert config.markdown_export.enabled is True
+    assert config.markdown_export.directory == export_dir
+    assert config.markdown_export.mode == "daily"
+    assert "# keep this comment" in path.read_text(encoding="utf-8")
+
+
+def test_markdown_export_rejects_unknown_mode(tmp_path):
+    config = load_config(
+        write_config(
+            tmp_path,
+            VALID_YAML + "\nmarkdown_export:\n  enabled: true\n  mode: other\n  directory: /tmp\n",
+        )
+    )
+
+    assert config.markdown_export.mode == "daily"
+
+
+def test_save_markdown_export_persists_separate_mode(tmp_path):
+    export_dir = tmp_path / "Dictations"
+    export_dir.mkdir()
+    path = write_config(tmp_path, VALID_YAML)
+
+    save_markdown_export(True, export_dir, path, mode="separate")
+
+    assert load_config(path).markdown_export.mode == "separate"
 
 
 # --- app_styles (SPEC.md §A2) ------------------------------------------------
